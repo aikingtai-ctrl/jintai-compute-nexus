@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KINGTAI · 金泰算力中枢</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+
+<header id="topbar" class="hud">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <div class="logo">KINGTAI <em>NEXUS</em></div>
+      <div class="slogan">金泰算力中枢 · 源自算力</div>
+    </div>
+  </div>
+  <nav id="modes">
+    <button data-mode="0" class="on">环状流场</button>
+    <button data-mode="1">黑洞吸积</button>
+    <button data-mode="2">聚变爆发</button>
+    <button data-mode="3">多层网络</button>
+  </nav>
+  <div class="right">
+    <div id="clock">--:--:--</div>
+    <div id="status" class="pill wait">● 连接中</div>
+    <button id="gear" title="设置 (S)">⚙</button>
+  </div>
+</header>
+
+<section id="cards" class="hud">
+  <div class="card">
+    <div class="k">A机 · 8×H100 显存</div>
+    <div class="v"><b id="aVram">--</b><small id="aVramT"> / -- GiB</small></div>
+    <canvas id="spVram"></canvas>
+  </div>
+  <div class="card">
+    <div class="k">任务 · 运行 / 排队</div>
+    <div class="v"><b id="jobs">--</b><small id="jobsT"></small></div>
+    <canvas id="spJobs"></canvas>
+  </div>
+  <div class="card">
+    <div class="k">内存 · A机 1TB / B机</div>
+    <div class="v"><b id="aRam">--</b><small id="ramT"></small></div>
+    <canvas id="spRam"></canvas>
+  </div>
+  <div class="card">
+    <div class="k">B机 · 4×RTX 5090</div>
+    <div class="v"><b id="bOnline">--</b><small id="bT"></small></div>
+    <canvas id="spB"></canvas>
+  </div>
+</section>
+
+<aside id="panel" class="hud hidden">
+  <h3>参数调节</h3>
+  <label>粒子密度 <input id="pDensity" type="range" min="0.2" max="1" step="0.05" value="0.8"></label>
+  <label>泛光强度 <input id="pBloom" type="range" min="0" max="2" step="0.05" value="0.55"></label>
+  <label>旋转速度 <input id="pSpin" type="range" min="0" max="2" step="0.05" value="1"></label>
+  <h3>配色方案</h3>
+  <div id="palettes">
+    <button data-pal="mono" class="on">黑白金</button>
+    <button data-pal="ice">冰川蓝</button>
+    <button data-pal="cyber">赛博紫</button>
+    <button data-pal="green">三体绿</button>
+  </div>
+  <label class="row"><input id="pAuto" type="checkbox" checked> 自动轮播模式（每 25 秒）</label>
+  <p class="note">快捷键：1–4 切模式 · F 全屏 · H 隐藏界面 · S 设置</p>
+  <p class="note" id="lanNote">纯净大屏：网址后加 ?nohud 可隐藏界面</p>
+  <p class="note">数据源：A机 ComfyUI ×8 · B机网关 NVML · 每 2 秒刷新</p>
+</aside>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+:root {
+  --ink: #e8eef5;
+  --acc: #ffcf7a;
+  --dim: rgba(225, 235, 245, 0.55);
+  --line: rgba(255, 255, 255, 0.14);
+  --num: "Bahnschrift", "DIN Alternate", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink);
+  font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", sans-serif; font-size: 20px;
+}
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; }
+.hud { transition: opacity .6s ease; }
+body.nohud .hud { opacity: 0; pointer-events: none; }
+
+/* 顶栏：细线、克制 */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 78px; padding: 0 36px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(0,0,0,0.75), rgba(0,0,0,0.15));
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.mark { width: 26px; height: 26px; border: 1.5px solid var(--ink); border-radius: 50%; position: relative; }
+.mark::after { content: ""; position: absolute; inset: 7px; background: var(--acc); border-radius: 50%; }
+.logo { font-family: var(--num); font-size: 26px; letter-spacing: 6px; font-weight: 600; }
+.logo em { font-style: normal; font-weight: 300; color: var(--dim); }
+.slogan { font-size: 20px; color: var(--dim); letter-spacing: 3px; }
+#modes { display: flex; gap: 6px; }
+button {
+  font: inherit; color: var(--dim); background: transparent; border: 0; border-bottom: 2px solid transparent;
+  padding: 8px 16px; cursor: pointer; letter-spacing: 2px;
+}
+button:hover { color: var(--ink); }
+button.on { color: var(--ink); border-bottom-color: var(--acc); }
+.right { display: flex; align-items: center; gap: 18px; }
+#clock { font-family: var(--num); font-size: 28px; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+.pill { font-size: 20px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 3px; }
+.pill.live { color: #9dffbf; border-color: rgba(157,255,191,0.4); }
+.pill.wait { color: var(--acc); }
+.pill.demo { color: var(--acc); border-color: rgba(255,207,122,0.5); }
+.pill.off { color: #ff8a8a; border-color: rgba(255,138,138,0.5); }
+#gear { font-size: 24px; padding: 2px 8px; }
+
+/* 底部四联：细线框 + 走势线 */
+#cards {
+  position: fixed; left: 36px; right: 36px; bottom: 24px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px;
+}
+.card { border: 1px solid var(--line); background: rgba(0,0,0,0.45); padding: 10px 16px 8px; position: relative; }
+.card::before, .card::after { content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--acc); border-style: solid; }
+.card::before { left: -1px; top: -1px; border-width: 2px 0 0 2px; }
+.card::after { right: -1px; bottom: -1px; border-width: 0 2px 2px 0; }
+.card .k { font-size: 20px; color: var(--dim); letter-spacing: 1px; }
+.card .v { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; }
+.card .v b { font-family: var(--num); font-size: 36px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.card .v small { font-size: 20px; color: var(--dim); }
+.card canvas { display: block; width: 100%; height: 46px; margin-top: 2px; }
+
+#panel {
+  position: fixed; top: 96px; right: 36px; width: 400px; padding: 18px 22px;
+  background: rgba(0, 0, 0, 0.88); border: 1px solid var(--line);
+}
+#panel.hidden { display: none; }
+#panel h3 { font-size: 22px; margin: 6px 0 10px; color: var(--acc); font-weight: 500; }
+#panel label { display: block; margin: 10px 0; }
+#panel label input[type=range] { width: 100%; margin-top: 6px; accent-color: #ffcf7a; }
+#panel label.row input { width: 22px; height: 22px; vertical-align: middle; }
+#palettes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#palettes button { border: 1px solid var(--line); }
+#palettes button.on { border-color: var(--acc); }
+.note { font-size: 20px; color: var(--dim); line-height: 1.45; margin: 10px 0 0; }
+
+/* 场景内标签：无底框，单行 */
+.nlabel {
+  font-family: var(--num); font-size: 20px; white-space: nowrap; pointer-events: none;
+  color: var(--ink); text-shadow: 0 0 6px #000, 0 0 2px #000; font-variant-numeric: tabular-nums;
+}
+.nlabel .id { font-weight: 600; letter-spacing: 1px; }
+.nlabel .st { color: var(--dim); }
+.nlabel .run { color: #9dffbf; }
+.nlabel .pend { color: var(--acc); }
+.nlabel.off { opacity: 0.45; }
+.corelabel { text-align: center; pointer-events: none; text-shadow: 0 0 10px #000, 0 0 4px #000; }
+.corelabel .t1 { font-size: 46px; font-weight: 700; letter-spacing: 10px; color: #fff; margin-right: -10px; }
+.corelabel .t2 { font-family: var(--num); font-size: 20px; color: var(--dim); letter-spacing: 4px; }
+.segnum { font-family: var(--num); font-size: 20px; color: var(--dim); pointer-events: none; }
+.hlabel { font-size: 20px; color: var(--dim); letter-spacing: 2px; pointer-events: none; }
+
+@media (max-width: 960px) {
+  #topbar { height: auto; padding: 10px 14px; flex-wrap: wrap; gap: 6px; }
+  .logo { font-size: 20px; letter-spacing: 3px; }
+  .slogan, #clock, .segnum, .hlabel { display: none; }
+  #modes { order: 3; width: 100%; justify-content: space-around; gap: 2px; }
+  #modes button { font-size: 16px; padding: 6px 8px; letter-spacing: 1px; }
+  .pill { font-size: 15px; padding: 3px 8px; }
+  #cards { left: 12px; right: 12px; bottom: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .card { padding: 8px 10px 6px; }
+  .card .k, .card .v small { font-size: 14px; }
+  .card .v b { font-size: 26px; }
+  .card canvas { height: 26px; }
+  #panel { left: 12px; right: 12px; top: 88px; width: auto; max-height: calc(100vh - 104px); overflow-y: auto; }
+}
+@media (max-width: 720px) {
+  .nlabel { font-size: 12px; }
+  .nlabel .st { display: none; }
+}
