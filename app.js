@@ -11,8 +11,10 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 const Q = new URLSearchParams(location.search);
 const CAPTURE = Q.has('capture');
 const FORCE_DEMO = Q.has('demo');
-const IS_PUBLIC_STATIC = /\.github\.io$|\.pages\.dev$/i.test(location.hostname) || location.protocol === 'file:';
-const CLOUD_DEMO = FORCE_DEMO || IS_PUBLIC_STATIC;
+const IS_PUBLIC_STATIC = /\.github\.io$|\.pages\.dev$/i.test(location.hostname);
+const LOCAL_FILE = location.protocol === 'file:';
+const ONLY_SIM = FORCE_DEMO || LOCAL_FILE;
+const TUNNEL_OVERRIDE = Q.get('tunnel');
 if (Q.has('nohud')) document.body.classList.add('nohud');
 
 const N = 12, NH = 6, MAXP = 46000, FIB = 14, FSEG = 48;
@@ -86,7 +88,7 @@ const nodes = [];
 for (let i = 0; i < N; i++) nodes.push({ id: i < 8 ? `A${i}` : `B${i - 8}`, machine: i < 8 ? 'A' : 'B', index: i < 8 ? i : i - 8,
   online: false, frac: 0, fracShown: 0, amp: 0, ampShown: 0, html: '', raw: {} });
 let lastOk = 0, everOk = false, fallbackDemo = false;
-const isDemo = () => CLOUD_DEMO || fallbackDemo;
+const isDemo = () => ONLY_SIM || fallbackDemo;
 const hist = { vram: [], ram: [], bram: [], power: [] };
 const HMAX = 120;
 
@@ -567,38 +569,82 @@ function demoStats(t) {   // 公网静态托管或未连接采集服务时使用
   return { ok: true, a: { online: 8, ram_total: 1007, ram_free: 365 + 45 * Math.sin(t * 0.03), gpus: A }, b: { online: 4, ram_total: 252, ram_free: 142 + 18 * Math.cos(t * 0.04), gpus: B } };
 }
 const bootAt = Date.now();
+let publicApiUrl = '', failCount = 0;
+async function resolvePublicApi() {
+  if (TUNNEL_OVERRIDE) {
+    if (/^https?:\/\//i.test(TUNNEL_OVERRIDE)) {
+      publicApiUrl = TUNNEL_OVERRIDE.replace(/\/$/, '') + '/__nexus_stats';
+    }
+    return publicApiUrl;
+  }
+  const candidates = [
+    `/jintai-domestic-portal/tunnel.json?t=${Math.floor(Date.now() / 60000)}`,
+    'https://testingcf.jsdelivr.net/gh/aikingtai-ctrl/jintai-domestic-portal@main/tunnel.json',
+  ];
+  for (const u of candidates) {
+    try {
+      const r = await fetch(u, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined,
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (j && typeof j.tunnel_url === 'string' && j.tunnel_url.startsWith('https://')) {
+        publicApiUrl = j.tunnel_url.replace(/\/$/, '') + '/__nexus_stats';
+        return publicApiUrl;
+      }
+    } catch {}
+  }
+  return '';
+}
+
 async function poll() {
-  if (CLOUD_DEMO) return;
+  if (ONLY_SIM) return;
   try {
-    const r = await fetch('/api/stats', {
+    let url = '/api/stats';
+    if (IS_PUBLIC_STATIC || TUNNEL_OVERRIDE) {
+      if (!publicApiUrl || failCount >= 3) await resolvePublicApi();
+      if (!publicApiUrl) throw new Error('no tunnel');
+      url = publicApiUrl;
+    }
+    const r = await fetch(url, {
       cache: 'no-store',
-      signal: AbortSignal.timeout ? AbortSignal.timeout(1800) : undefined,
+      signal: AbortSignal.timeout ? AbortSignal.timeout(IS_PUBLIC_STATIC || TUNNEL_OVERRIDE ? 3500 : 1800) : undefined,
     });
+    if (!r.ok) throw new Error('http ' + r.status);
     const j = await r.json();
     if (!j.ok || !j.a) throw new Error('no data');
+    if (!everOk && (IS_PUBLIC_STATIC || TUNNEL_OVERRIDE)) {
+      hist.vram.length = hist.ram.length = hist.bram.length = hist.power.length = 0;
+    }
+    failCount = 0;
     fallbackDemo = false;
     applyStats(j, true); lastOk = Date.now(); everOk = true;
     if (j.lan_url) setText('lanNote', `内网大屏：${j.lan_url}（纯画面加 ?nohud）`);
   } catch (e) {
-    if ((!everOk && Date.now() - bootAt > 6000) || (everOk && Date.now() - lastOk > 15000)) {
+    failCount++;
+    if ((!everOk && Date.now() - bootAt > 4500) || (everOk && Date.now() - lastOk > 15000)) {
       fallbackDemo = true;
     }
   }
 }
-if (CLOUD_DEMO) {
+if (ONLY_SIM) {
   for (let k = -40; k <= 0; k++) applyStats(demoStats(k * 2), true);
 } else {
-  poll(); setInterval(poll, 2000);
+  if (IS_PUBLIC_STATIC || TUNNEL_OVERRIDE) {
+    for (let k = -40; k <= 0; k++) applyStats(demoStats(k * 2), true);
+  }
+  poll();
+  setInterval(poll, IS_PUBLIC_STATIC || TUNNEL_OVERRIDE ? 2500 : 2000);
 }
 if (!CAPTURE && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
 const captureStart = Date.now();
 function updateStatus() {
   const el = document.getElementById('status'); let cls, txt;
-  if (FORCE_DEMO) { cls = 'demo'; txt = '● 演示模式'; }
-  else if (IS_PUBLIC_STATIC) { cls = 'demo'; txt = '● 云端展映（仿真数据）'; }
-  else if (fallbackDemo) { cls = 'demo'; txt = '● 离线演示（正在重连…）'; }
-  else if (!everOk) { cls = 'wait'; txt = '● 连接中'; }
-  else { const age = (Date.now() - lastOk) / 1000; if (age < 6) { cls = 'live'; txt = '● 实时数据'; } else { cls = 'off'; txt = `● 数据延迟 ${age.toFixed(0)} 秒`; } }
+  if (ONLY_SIM) { cls = 'demo'; txt = '● 演示模式'; }
+  else if (fallbackDemo) { cls = 'demo'; txt = IS_PUBLIC_STATIC ? '● 云端展映（仿真兜底）' : '● 离线演示（正在重连…）'; }
+  else if (!everOk) { cls = 'wait'; txt = '● 连接实时中枢…'; }
+  else { const age = (Date.now() - lastOk) / 1000; if (age < 8) { cls = 'live'; txt = '● 实时数据'; } else { cls = 'off'; txt = `● 数据延迟 ${age.toFixed(0)} 秒`; } }
   if (el.textContent !== txt) { el.textContent = txt; el.className = 'pill ' + cls; }
   setText('clock', (CAPTURE ? new Date(captureStart + simTime * 1000) : new Date()).toLocaleTimeString('zh-CN', { hour12: false }));
 }
