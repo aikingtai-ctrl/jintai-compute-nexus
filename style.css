@@ -98,12 +98,15 @@ button.on { color: var(--ink); border-bottom-color: var(--acc); }
   .pill { font-size: 15px; padding: 3px 8px; }
   #cards { left: 12px; right: 12px; bottom: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .card { padding: 8px 10px 6px; }
-  .card .k, .card .v small { font-size: 14px; }
-  .card .v b { font-size: 26px; }
+  .card .k { font-size: 14px; }
+  .card .v small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .card .v b { font-size: 22px; }
   .card canvas { height: 26px; }
   #panel { left: 12px; right: 12px; top: 88px; width: auto; max-height: calc(100vh - 104px); overflow-y: auto; }
 }
 @media (max-width: 720px) {
-  .nlabel { font-size: 12px; }
-  .nlabel .st { display: none; }
+  .nlabel { font-size: 11px; }
+  .nlabel .st, .nlabel .pend { display: none; }
+  .corelabel .t1 { font-size: 24px; letter-spacing: 5px; margin-right: -5px; }
+  .corelabel .t2 { font-size: 11px; letter-spacing: 2px; }
 }

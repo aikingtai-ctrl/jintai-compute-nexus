@@ -45,8 +45,8 @@ stage.appendChild(labelRenderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#000000');
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 500);
-const getCamZ = () => (innerWidth / innerHeight >= 1.5 ? 34 : Math.min(125, 56 / Math.max(0.38, innerWidth / innerHeight)));
-const getLookX = () => (innerWidth < innerHeight ? 2.6 : 0);
+const getCamZ = () => (innerWidth / innerHeight >= 1.5 ? 34 : Math.min(136, 62 / Math.max(0.38, innerWidth / innerHeight)));
+const getLookX = () => (innerWidth < innerHeight ? 3.8 : 0);
 let camZ = getCamZ(), lookX = getLookX();
 camera.position.set(lookX, LOOK_Y + 0.4, camZ);
 
@@ -664,7 +664,7 @@ function frame(dt) {
 
   shared.uTime.value = t; shared.uBlend.value = blend; shared.uModeA.value = modeA; shared.uModeB.value = modeB; shared.uSpin.value = spin;
   finish.uniforms.uTime.value = t;
-  pGeo.setDrawRange(0, Math.floor(MAXP * density));
+  pGeo.setDrawRange(0, Math.floor(MAXP * density * (innerWidth < 720 ? 0.45 : 1)));
   [dial, ...markers, ...hMarkers].forEach((m) => m.quaternion.copy(camera.quaternion));
 
   camera.position.set(lookX + Math.sin(t * 0.045) * 1.8 * spin, LOOK_Y + 0.4 + Math.sin(t * 0.031) * 0.4 * spin, camZ);
