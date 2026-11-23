@@ -36,6 +36,31 @@ const PALETTES = {
 };
 let pal = PALETTES.mono;
 
+// ---------- 四维超立方（tesseract）：16 顶点 32 棱，XW/YW/ZW 三平面旋转后四维透视投影 ----------
+const NMODE = 5;
+const T_EDGES = [];
+for (let v = 0; v < 16; v++) {
+  const s = [v & 1 ? 1 : -1, v & 2 ? 1 : -1, v & 4 ? 1 : -1, v & 8 ? 1 : -1];
+  for (let ax = 0; ax < 4; ax++) if (s[ax] === -1) T_EDGES.push([s, ax]);
+}
+const rot4 = { xw: 0, yw: 0, zw: 0 };
+function proj4(x, y, z, w, scale, out, o) {
+  let c = Math.cos(rot4.xw), s = Math.sin(rot4.xw), t;
+  t = c * x - s * w; w = s * x + c * w; x = t;
+  c = Math.cos(rot4.yw); s = Math.sin(rot4.yw); t = c * y - s * w; w = s * y + c * w; y = t;
+  c = Math.cos(rot4.zw); s = Math.sin(rot4.zw); t = c * z - s * w; w = s * z + c * w; z = t;
+  const k = scale / (2.6 - w);
+  out[o] = x * k; out[o + 1] = y * k; out[o + 2] = z * k;
+  return w;
+}
+function fillTess(pos, wv, scale) {     // 32 棱 × 2 端点
+  T_EDGES.forEach(([s, ax], e) => {
+    const b = s.slice(); b[ax] = 1;
+    wv[e * 2] = proj4(s[0], s[1], s[2], s[3], scale, pos, e * 6);
+    wv[e * 2 + 1] = proj4(b[0], b[1], b[2], b[3], scale, pos, e * 6 + 3);
+  });
+}
+
 // ---------- 渲染器 ----------
 const stage = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -65,11 +90,11 @@ const finish = new ShaderPass({
   uniforms: {
     tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(innerWidth, innerHeight) },
     uHole: { value: new THREE.Vector2(0.3, 0.5) }, uLens: { value: 0 }, uShock: { value: 0 }, uShockAmp: { value: 0 },
-    uGlitch: { value: 0 }, uStreak: { value: 0.22 }, uStreakCol: { value: new THREE.Color('#ffcf7a') },
+    uGlitch: { value: 0 }, uStreak: { value: 0.22 }, uStreakCol: { value: new THREE.Color('#ffcf7a') }, uRays: { value: 0.5 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform float uTime, uLens, uShock, uShockAmp, uGlitch, uStreak; uniform vec2 uRes, uHole; uniform vec3 uStreakCol;
+    uniform sampler2D tDiffuse; uniform float uTime, uLens, uShock, uShockAmp, uGlitch, uStreak, uRays; uniform vec2 uRes, uHole; uniform vec3 uStreakCol;
     varying vec2 vUv;
     float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main(){
@@ -94,6 +119,11 @@ const finish = new ShaderPass({
       vec2 off = c * d * (0.014 + 0.05 * uGlitch) + vec2(0.004 * uGlitch, 0.0);
       vec3 col = vec3(texture2D(tDiffuse, uv + off).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - off).b);
       col *= shade;
+      if (uRays > 0.001) {                         // 体积光：自核心向外的光束
+        vec2 gd = (uHole - uv) * (0.55 / 16.0); vec2 gp = uv + gd * rnd(gl_FragCoord.xy + 3.1); float dec = 1.0; vec3 gr = vec3(0.0);
+        for (int i = 0; i < 16; i++) { gp += gd; gr += max(texture2D(tDiffuse, gp).rgb - 0.55, 0.0) * dec; dec *= 0.9; }
+        col += gr * uStreakCol * uRays * 0.11;
+      }
       if (uStreak > 0.001) {                       // 变形宽银幕横向光芒
         vec3 st = vec3(0.0); float j = rnd(gl_FragCoord.xy);
         for (int i = 1; i <= 14; i++) {
@@ -133,7 +163,7 @@ const agg = { aVramPct: null, online: 0 };
 
 // ---------- 公共 GLSL：粒子与流线共用的路径函数 ----------
 const PATH_GLSL = `
-uniform float uTime, uBlend, uModeA, uModeB, uSpin, uBoot;
+uniform float uTime, uBlend, uModeA, uModeB, uSpin, uBoot, uXW, uYW, uZW;
 uniform vec3 uSC; uniform float uR;
 uniform vec3 uNodePos[${N}]; uniform float uNodeAmp[${N}]; uniform float uNodeOn[${N}]; uniform vec3 uNodeCol[${N}];
 uniform vec3 uH1[${NH}]; uniform vec3 uH2[${NH}];
@@ -166,12 +196,18 @@ vec3 pathNet(int n, float t, float o1, float o2){
   else q = mix(uH2[j], uNodePos[n], smoothstep(0.0, 1.0, s - 2.0));
   return q;
 }
+vec3 pathTess(int n, float t, float o1, float o2){   // 超维：双螺旋绞合缆束
+  vec3 q = pathFlow(n, t, o1 * 0.55, o2 * 0.55);
+  float th = t * 18.0 + (o1 > 0.0 ? 3.14159 : 0.0) + uTime * 1.6 + float(n) * 0.7;
+  return q + vec3(0.0, cos(th), sin(th)) * (0.35 + 0.6 * abs(o2)) * sin(3.14159 * t);
+}
 vec3 pathMode(float m, int n, float t, float o1, float o2){
   vec3 q;
   if (m < 0.5) q = pathFlow(n, t, o1, o2);
   else if (m < 1.5) q = pathHole(n, t, o1, o2);
   else if (m < 2.5) q = pathFusion(n, t, o1, o2);
-  else q = pathNet(n, t, o1, o2);
+  else if (m < 3.5) q = pathNet(n, t, o1, o2);
+  else q = pathTess(n, t, o1, o2);
   return q;
 }
 vec3 pathBlend(int n, float t, float o1, float o2){
@@ -181,6 +217,7 @@ vec3 pathBlend(int n, float t, float o1, float o2){
 const vec3s = (k) => Array.from({ length: k }, () => new THREE.Vector3());
 const shared = {
   uTime: { value: 0 }, uBlend: { value: 1 }, uModeA: { value: 0 }, uModeB: { value: 0 }, uSpin: { value: 1 }, uBoot: { value: 0 },
+  uXW: { value: 0 }, uYW: { value: 0 }, uZW: { value: 0 },
   uSC: { value: SC.clone() }, uR: { value: R },
   uNodePos: { value: nodePos.map((v) => v.clone()) }, uNodeAmp: { value: new Array(N).fill(0) },
   uNodeOn: { value: new Array(N).fill(0) }, uNodeCol: { value: vec3s(N) },
@@ -259,6 +296,7 @@ sphere.position.copy(SC);
 sphere.rotation.x = 0.35;
 scene.add(sphere);
 const sphereUni = { uTime: shared.uTime, uBoot: shared.uBoot, uPulse: { value: 0 }, uCollapse: { value: 0 }, uLoad: { value: 0 },
+  uMorph: { value: 0 }, uXW: shared.uXW, uYW: shared.uYW, uZW: shared.uZW,
   uWhite: shared.uWhite, uAcc: shared.uAcc, uPR: shared.uPR, uR: shared.uR };
 const orbits = [];
 {
@@ -279,8 +317,14 @@ const orbits = [];
   pg.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
   pg.setAttribute('aRnd', new THREE.BufferAttribute(pRnd, 1));
   pg.setAttribute('aShell', new THREE.BufferAttribute(pShell, 1));
+  {   // 每点分配到超立方的一条棱上（超维模式时点阵收拢为四维超立方）
+    const E4 = new Float32Array(pts.length * 4), EX = new Float32Array(pts.length * 2), per = Math.ceil(pts.length / 32);
+    pts.forEach((_, i) => { const [s, ax] = T_EDGES[i % 32]; E4.set(s, i * 4); EX[i * 2] = ax; EX[i * 2 + 1] = (Math.floor(i / 32) + 0.5) / per; });
+    pg.setAttribute('aE4', new THREE.BufferAttribute(E4, 4));
+    pg.setAttribute('aEx', new THREE.BufferAttribute(EX, 2));
+  }
   const common = `
-    uniform float uTime, uPulse, uCollapse, uLoad, uPR, uR, uBoot; uniform vec3 uWhite, uAcc;
+    uniform float uTime, uPulse, uCollapse, uLoad, uPR, uR, uBoot, uMorph; uniform vec3 uWhite, uAcc;
     attribute float aRnd;
     vec3 deform(vec3 p){
       float k = 1.0 + uPulse * (0.16 + 0.03 * sin(uTime * 3.0 + aRnd * 6.2832));
@@ -293,15 +337,27 @@ const orbits = [];
   const pm = new THREE.ShaderMaterial({
     uniforms: sphereUni, ...ADD,
     vertexShader: common + `
-      attribute float aShell; varying float vA; varying vec3 vC;
+      attribute float aShell; attribute vec4 aE4; attribute vec2 aEx; uniform float uXW, uYW, uZW; varying float vA; varying vec3 vC;
+      vec3 tessP(out float w4){
+        vec4 v = aE4; float t = aEx.y; float ax = aEx.x;
+        if (ax < 0.5) v.x += 2.0 * t; else if (ax < 1.5) v.y += 2.0 * t; else if (ax < 2.5) v.z += 2.0 * t; else v.w += 2.0 * t;
+        float c = cos(uXW), s = sin(uXW); v = vec4(c * v.x - s * v.w, v.y, v.z, s * v.x + c * v.w);
+        c = cos(uYW); s = sin(uYW); v = vec4(v.x, c * v.y - s * v.w, v.z, s * v.y + c * v.w);
+        c = cos(uZW); s = sin(uZW); v = vec4(v.x, v.y, c * v.z - s * v.w, s * v.z + c * v.w);
+        w4 = v.w; return v.xyz * (6.5 / (2.6 - v.w));
+      }
       void main(){
         vec3 p = deform(position);
+        float w4 = 0.0; vec3 tp = tessP(w4) * (1.0 + uPulse * 0.08);
+        p = mix(p, tp, uMorph);
         float flash = step(fract(uTime * 0.22 + aRnd * 17.0), 0.012 + 0.05 * uLoad);
         float sb = scanBand(position) * aShell;
-        vA = ((aShell > 0.5 ? mix(0.18, 0.95, depthA(p)) : 0.22) * (1.0 - 0.6 * uCollapse) + flash + sb * 0.9) * uBoot;
+        float aBase = (aShell > 0.5 ? mix(0.18, 0.95, depthA(p)) : 0.22) * (1.0 - 0.6 * uCollapse) + flash + sb * 0.9;
+        vA = mix(aBase, 0.55 + 0.5 * smoothstep(-1.0, 1.0, w4) + flash, uMorph) * uBoot;
         vC = mix(mix(uWhite, uAcc, flash), uAcc, min(sb, 1.0) * 0.75);
+        vC = mix(vC, mix(uWhite, uAcc, smoothstep(-0.2, 1.0, w4)), uMorph);
         vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
-        gl_PointSize = (aShell > 0.5 ? 0.16 : 0.11) * (1.0 + 2.0 * flash + 0.8 * sb) * uPR * (300.0 / -mv.z);
+        gl_PointSize = mix(aShell > 0.5 ? 0.16 : 0.11, 0.2, uMorph) * (1.0 + 2.0 * flash + 0.8 * sb) * uPR * (300.0 / -mv.z);
       }`,
     fragmentShader: ROUND_FS,
   });
@@ -335,7 +391,7 @@ const orbits = [];
         vec3 p = deform(position);
         float flash = step(fract(uTime * 0.15 + aRnd * 23.0), 0.01 + 0.06 * uLoad);
         float sb = scanBand(position);
-        vA = (mix(0.03, 0.2, depthA(p)) + flash * 0.9 + sb * 0.35) * (1.0 - 0.7 * uCollapse) * uBoot;
+        vA = (mix(0.03, 0.2, depthA(p)) + flash * 0.9 + sb * 0.35) * (1.0 - 0.7 * uCollapse) * (1.0 - uMorph) * uBoot;
         vC = mix(mix(uWhite, uAcc, flash), uAcc, min(sb, 1.0) * 0.8);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
@@ -372,9 +428,29 @@ const orbits = [];
 const core = new THREE.Group();
 core.position.copy(SC);
 scene.add(core);
-const icoMat = new THREE.LineBasicMaterial({ color: 0xffffff, ...ADD, opacity: 0.22 });
 const octMat = new THREE.LineBasicMaterial({ color: 0xffcf7a, ...ADD, opacity: 0.55 });
-const ico = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(R * 0.3, 1)), icoMat);
+function makeTess(scale, ptSize) {
+  const pos = new Float32Array(64 * 3), wv = new Float32Array(64);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('aW', new THREE.BufferAttribute(wv, 1).setUsage(THREE.DynamicDrawUsage));
+  const uni = { uA: { value: 1 }, uWhite: shared.uWhite, uAcc: shared.uAcc, uPR: shared.uPR, uSz: { value: ptSize } };
+  const lines = new THREE.LineSegments(g, new THREE.ShaderMaterial({ uniforms: uni, ...ADD,
+    vertexShader: `attribute float aW; varying float vW; void main(){ vW = aW; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uA; uniform vec3 uWhite, uAcc; varying float vW;
+      void main(){ float k = smoothstep(-1.0, 1.0, vW); gl_FragColor = vec4(mix(uWhite, uAcc, k) * (1.0 + k), uA * (0.35 + 0.65 * k)); }` }));
+  const pts = new THREE.Points(g, new THREE.ShaderMaterial({ uniforms: uni, ...ADD,
+    vertexShader: `attribute float aW; uniform float uA, uPR, uSz; uniform vec3 uWhite, uAcc; varying float vA; varying vec3 vC;
+      void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; float k = smoothstep(-1.0, 1.0, aW);
+        vA = uA; vC = mix(uWhite, uAcc, k) * 1.6; gl_PointSize = uSz * (0.6 + 0.8 * k) * uPR * (300.0 / -mv.z); }`,
+    fragmentShader: ROUND_FS }));
+  lines.frustumCulled = pts.frustumCulled = false;
+  lines.add(pts);
+  return { lines, pos, wv, g, scale, uni, upd() { fillTess(pos, wv, scale); g.attributes.position.needsUpdate = true; g.attributes.aW.needsUpdate = true; } };
+}
+const coreTess = makeTess(2.6, 0.22);
+const ico = coreTess.lines;
+const icoMat = { set opacity(v) { coreTess.uni.uA.value = v; }, color: { set() {} } };
 const oct = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.OctahedronGeometry(R * 0.16, 0)), octMat);
 core.add(ico, oct);
 const glowUni = { uAcc: shared.uAcc, uI: { value: 0.3 } };
@@ -575,8 +651,15 @@ const particles = new THREE.Points(pGeo, new THREE.ShaderMaterial({
         vec3 dir = normalize(aSeed.xyz * 2.0 - 1.0 + 1e-4); float pl = fract(uTime * 0.25 + aSeed.w * 0.08);
         if (aSeed.w < 0.06) { float an = aSeed.y * 6.2832; dir = tiltX(vec3(cos(an), 0.0, sin(an)), 1.2); }
         p = uSC + dir * (uR * 0.4 + pl * 17.0); a = (1.0 - pl) * 0.55; c = mix(uAcc, uWhite, pl);
-      } else {                  // 背景漂浮尘
+      } else if (m < 3.5) {     // 背景漂浮尘
         p = vec3((aSeed.x - 0.5) * 60.0, (aSeed.y - 0.5) * 32.0 + sin(uTime * 0.2 + aSeed.z * 6.0) * 0.5, (aSeed.z - 0.5) * 12.0 - 6.0); a = 0.10;
+      } else {                  // 克利福德环面：四维环面经旋转与球极投影后不断自我翻转
+        float a1 = aSeed.x * 6.2832, b1 = aSeed.y * 6.2832 + uTime * 0.25;
+        vec4 v = vec4(cos(a1), sin(a1), cos(b1), sin(b1)) * 0.7071;
+        float cs = cos(uXW * 0.7), sn = sin(uXW * 0.7); v = vec4(cs * v.x - sn * v.w, v.y, v.z, sn * v.x + cs * v.w);
+        cs = cos(uYW); sn = sin(uYW); v = vec4(v.x, cs * v.y - sn * v.w, v.z, sn * v.y + cs * v.w);
+        vec3 q = v.xyz / (1.25 - v.w);
+        p = uSC + tiltX(q * 5.4, 0.35); a = 0.22 + 0.25 * smoothstep(-0.5, 0.7, v.w); c = mix(uWhite, uAcc, smoothstep(0.0, 0.7, v.w));
       }
     }
     void main(){
@@ -623,6 +706,8 @@ scene.add(particles);
         float t0 = fract(aSeed.z + uTime * (0.05 + 0.2 * amp) * aSeed.w);
         float t = t0 - aTr * 0.02; float vis = step(0.0, t); t = clamp(t, 0.0, 1.0);
         vec3 p = pathBlend(n, t, aSeed.x * 0.9, aSeed.y);
+        float th = t * 30.0 + aSeed.z * 40.0 + (aSeed.w > 1.0 ? 3.14159 : 0.0);   // 双螺旋缠绕
+        p += vec3(0.0, cos(th), sin(th)) * 0.26 * sin(3.14159 * t);
         vA = uNodeOn[n] * smoothstep(0.35, 0.7, amp) * vis * pow(1.0 - aTr, 1.6) * smoothstep(0.0, 0.05, t) * smoothstep(1.0, 0.93, t) * uBoot;
         vC = mix(uWhite * 1.8, uAcc * 1.4, min(1.0, aTr * 1.6));
         vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
@@ -670,6 +755,137 @@ const netUni = { uTime: shared.uTime, uVis: { value: 0 }, uNodeAmp: shared.uNode
         gl_FragColor = vec4(mix(uWhite, uAcc, run), (0.08 + 0.18 * dash + 0.7 * run) * step(vU, uBoot * 1.05)); }` })));
 }
 
+// ================= v4 多维层 =================
+// 巨型超立方（超维模式）
+const bigTess = makeTess(6.5, 0.7);
+sphere.add(bigTess.lines);
+
+// 浑天仪式陀螺环：3D 倾斜刻度环，前亮后暗体现纵深
+const gimbals = [];
+for (let k = 0; k < 3; k++) {
+  const r0 = 7.9 + k * 0.75, r1 = r0 + 0.24;
+  const m = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 320, 1), new THREE.ShaderMaterial({
+    uniforms: { uTime: shared.uTime, uBoot: shared.uBoot, uWhite: shared.uWhite, uAcc: shared.uAcc, uK: { value: k }, uR0: { value: r0 }, uR1: { value: r1 }, uVis: { value: 1 } },
+    ...ADD, side: THREE.DoubleSide,
+    vertexShader: `varying vec3 vL; varying float vZ; void main(){ vL = position; vec4 w = modelMatrix * vec4(position, 1.0); vZ = w.z; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `uniform float uTime, uBoot, uK, uR0, uR1, uVis; uniform vec3 uWhite, uAcc; varying vec3 vL; varying float vZ;
+      float hair(float d, float px){ float w = fwidth(d) * px; return 1.0 - smoothstep(0.0, w, abs(d)); }
+      void main(){
+        float r = length(vL.xy); float a = atan(vL.y, vL.x) / 6.28318 + 0.5;
+        float dir = uK == 1.0 ? -1.0 : 1.0;
+        float edges = hair(r - uR0 - 0.01, 1.2) + hair(r - uR1 + 0.01, 1.2);
+        float tick = step(fract(a * (90.0 + 30.0 * uK)), 0.3) * step(uR0 + 0.07, r) * step(r, uR1 - 0.07);
+        float seg = step(0.06, fract(a * (3.0 + uK) + uTime * 0.015 * dir));
+        float bead = exp(-pow((fract(a - uTime * 0.045 * dir * (1.0 + uK * 0.5)) - 0.5) * 70.0, 2.0));
+        float depth = smoothstep(-10.0, 10.0, vZ);
+        float al = ((0.09 * edges + 0.16 * tick) * seg * mix(0.2, 1.0, depth) + bead * 0.9 * depth) * uVis * uBoot;
+        gl_FragColor = vec4(mix(uWhite, uAcc, min(1.0, bead + 0.35 * uK)), al);
+      }` }));
+  m.position.copy(SC);
+  scene.add(m); gimbals.push(m);
+}
+
+// 三维显存时序城：12 卡 × 24 采样（48 秒）柱阵，最前排为最新
+const CR = 24, CITY = new THREE.Vector3(-1.2, -10.6, -8);
+const cityH = new Float32Array(N * CR), cityShown = new Float32Array(N * CR);
+const nodeHist = Array.from({ length: N }, () => []);
+let cityAttr = null;
+{
+  const base = new THREE.BoxGeometry(0.78, 1, 0.78); base.translate(0, 0.5, 0);
+  const ig = new THREE.InstancedBufferGeometry();
+  ig.index = base.index; ig.setAttribute('position', base.attributes.position); ig.setAttribute('uv', base.attributes.uv);
+  const cell = new Float32Array(N * CR * 2);
+  for (let c = 0; c < N; c++) for (let r = 0; r < CR; r++) { cell[(c * CR + r) * 2] = c; cell[(c * CR + r) * 2 + 1] = r; }
+  ig.setAttribute('aCell', new THREE.InstancedBufferAttribute(cell, 2));
+  ig.setAttribute('aH', new THREE.InstancedBufferAttribute(cityShown, 1).setUsage(THREE.DynamicDrawUsage));
+  ig.instanceCount = N * CR;
+  cityAttr = ig.attributes.aH;
+  const city = new THREE.Mesh(ig, new THREE.ShaderMaterial({
+    uniforms: { uBase: { value: CITY }, uBoot: shared.uBoot, uTime: shared.uTime, uWhite: shared.uWhite, uAcc: shared.uAcc }, ...ADD,
+    vertexShader: `attribute vec2 aCell; attribute float aH; uniform vec3 uBase; uniform float uBoot; varying vec2 vUv; varying float vH, vRow, vCol, vY;
+      void main(){ vUv = uv; vH = aH; vRow = aCell.y; vCol = aCell.x; vY = position.y;
+        vec3 p = position; p.y *= max(aH, 0.015) * 3.4 * uBoot;
+        vec3 w = uBase + vec3(aCell.x * 1.12 + (aCell.x > 7.5 ? 0.6 : 0.0), 0.0, -aCell.y * 1.22) + p;
+        gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0); }`,
+    fragmentShader: `uniform float uTime; uniform vec3 uWhite, uAcc; varying vec2 vUv; varying float vH, vRow, vCol, vY;
+      void main(){
+        float e = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+        float edge = 1.0 - smoothstep(0.0, fwidth(e) * 1.6 + 0.004, e);
+        float fade = pow(1.0 - vRow / 24.0, 2.2);
+        vec3 c = vCol > 7.5 ? uAcc : uWhite;
+        float top = step(0.999, vY);
+        float scan = exp(-pow(fract(vRow / 24.0 - uTime * 0.12) - 0.5, 2.0) * 400.0);
+        float al = (0.012 + 0.2 * edge + 0.12 * top * vH + 0.2 * scan * edge) * fade * (vRow < 0.5 ? 2.2 : 1.0);
+        gl_FragColor = vec4(mix(c, uAcc, vH * 0.45 + scan * 0.5), al);
+      }` }));
+  city.frustumCulled = false;
+  scene.add(city);
+  // 底板网格
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(15.4, 30), new THREE.ShaderMaterial({ uniforms: shared, ...ADD,
+    vertexShader: VS_UV,
+    fragmentShader: `varying vec2 vUv; uniform float uBoot, uTime; uniform vec3 uWhite, uAcc;
+      void main(){ vec2 g = vUv * vec2(13.75, 24.6); vec2 d = abs(fract(g) - 0.5) / fwidth(g);
+        float l = 1.0 - min(min(d.x, d.y) * 0.5, 1.0); float fade = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.6, vUv.y) ;
+        float frame = step(vUv.x, 0.004) + step(0.996, vUv.x);
+        gl_FragColor = vec4(uWhite * (0.035 * (1.0 - l) * 0.0 + 0.05 * l + 0.25 * frame) * fade * uBoot, 1.0); }` }));
+  plate.rotation.x = -Math.PI / 2;
+  plate.position.set(CITY.x + 6.6, CITY.y - 0.01, CITY.z - 14.0);
+  scene.add(plate);
+}
+
+// 前景散景光斑（景深层）
+{
+  const n = 70, p = new Float32Array(n * 3), s = new Float32Array(n);
+  for (let i = 0; i < n; i++) { p.set([(Math.random() - 0.5) * 50, (Math.random() - 0.5) * 26, 12 + Math.random() * 13], i * 3); s[i] = Math.random(); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aRnd', new THREE.BufferAttribute(s, 1));
+  const bok = new THREE.Points(g, new THREE.ShaderMaterial({ uniforms: shared, ...ADD,
+    vertexShader: `uniform float uTime, uPR, uBoot; uniform vec3 uWhite, uAcc; attribute float aRnd; varying float vA; varying vec3 vC;
+      void main(){ vec3 q = position + vec3(sin(uTime * 0.07 + aRnd * 9.0) * 1.5, sin(uTime * 0.11 + aRnd * 5.0) * 0.8, 0.0);
+        vec4 mv = modelViewMatrix * vec4(q, 1.0); gl_Position = projectionMatrix * mv;
+        vA = (0.012 + 0.022 * aRnd) * uBoot; vC = mix(uWhite, uAcc, step(0.82, aRnd) * 0.6);
+        gl_PointSize = (1.6 + aRnd * 3.6) * uPR * (300.0 / -mv.z); }`,
+    fragmentShader: `varying float vA; varying vec3 vC;
+      void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; if (d > 1.0) discard;
+        float a = smoothstep(1.0, 0.9, d) * (0.65 + 0.35 * smoothstep(0.55, 0.92, d)); gl_FragColor = vec4(vC, vA * a); }` }));
+  bok.frustumCulled = false;
+  scene.add(bok);
+}
+
+// 远景数据瀑布柱（全息字符流）
+{
+  const n = 34, pos = [], uv = [], sd = [], idx = [];
+  for (let i = 0; i < n; i++) {
+    let x = (Math.random() - 0.5) * 110; if (Math.abs(x - SC.x) < 9) x += 18;
+    const z = -24 - Math.random() * 22, h = 30 + Math.random() * 16, w = 0.42, y = -2 + (Math.random() - 0.5) * 6, s = Math.random(), b = i * 4;
+    pos.push(x - w, y - h / 2, z, x + w, y - h / 2, z, x + w, y + h / 2, z, x - w, y + h / 2, z);
+    uv.push(0, 0, 1, 0, 1, 1, 0, 1); sd.push(s, s, s, s);
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uv), 2));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(new Float32Array(sd), 1));
+  g.setIndex(idx);
+  const cols = new THREE.Mesh(g, new THREE.ShaderMaterial({ uniforms: shared, ...ADD,
+    vertexShader: `attribute float aSeed; varying vec2 vUv; varying float vS; void main(){ vUv = uv; vS = aSeed; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uTime, uBoot; uniform vec3 uWhite, uAcc; varying vec2 vUv; varying float vS;
+      float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main(){
+        float cells = 64.0; float cy = floor(vUv.y * cells); float fy = fract(vUv.y * cells);
+        float spd = 0.05 + 0.12 * fract(vS * 7.13);
+        float head = fract(-uTime * spd + vS); float dy = fract(vUv.y - head);
+        float trail = exp(-dy * 6.0); float hg = exp(-dy * 90.0);
+        float glyph = step(0.38, rnd(vec2(cy, floor(uTime * 5.0 + vS * 50.0) + vS * 13.0)));
+        float block = step(0.14, fy) * step(fy, 0.86) * step(0.18, vUv.x) * step(vUv.x, 0.82);
+        float edgeFade = smoothstep(0.0, 0.15, vUv.y) * smoothstep(1.0, 0.8, vUv.y);
+        float a = block * glyph * (0.04 + 0.5 * trail) * edgeFade;
+        gl_FragColor = vec4(mix(uWhite, uAcc, hg + 0.25) * (a * 0.2 + hg * block * 0.35) * uBoot, 1.0);
+      }` }));
+  cols.frustumCulled = false;
+  scene.add(cols);
+}
+
 // ---------- 节点标记（右侧列）与隐藏层 ----------
 const MK = 2.4;
 const markerFS = `
@@ -713,6 +929,7 @@ for (let i = 0; i < 8; i++) {
 }
 const caps = [['任务编排', H1[0].x], ['资源分配', H2[0].x], ['GPU 执行', nodePos[0].x]]
   .map(([t, x]) => addLabel('hlabel', t, new THREE.Vector3(x, 9.7, 0)));
+const cityLabel = addLabel('hlabel city', '显存时序 · 12 卡 × 48 秒', new THREE.Vector3(CITY.x - 0.4, CITY.y - 0.5, CITY.z + 0.6), 0, 0);
 
 // ---------- 事件（任务开始/完成/排队/上下线）：节点涟漪 + 浮动提示 + 事件流 ----------
 const popups = [];
@@ -808,6 +1025,14 @@ function applyStats(j, record) {
       else amp = 0.08 + 0.6 * run + 0.05 * pend;
     }
     n.amp = clamp01(amp);
+    if (record) { const hh = nodeHist[i]; hh.push(n.online ? (n.machine === 'A' ? n.frac : Math.max(n.frac, n.amp)) : 0); if (hh.length > CR) hh.shift(); }
+  }
+  if (record) {
+    for (let c = 0; c < N; c++) {
+      const hh = nodeHist[c];
+      for (let r = CR - 1; r >= 1; r--) cityShown[c * CR + r] = cityShown[c * CR + r - 1];
+      for (let r = 0; r < CR; r++) cityH[c * CR + r] = hh[hh.length - 1 - r] ?? 0;
+    }
   }
   const a = j.a || {}, b = j.b || {};
   const aG = (a.gpus || []).filter((g) => g.online);
@@ -978,7 +1203,7 @@ document.getElementById('pSpin').addEventListener('input', (e) => { spin = +e.ta
 const pStreak = document.getElementById('pStreak');
 document.getElementById('pAuto').addEventListener('change', (e) => { autoCycle = e.target.checked; modeSince = simTime; });
 addEventListener('keydown', (e) => {
-  if (e.key >= '1' && e.key <= '4') { stopAuto(); setMode(+e.key - 1, simTime); }
+  if (e.key >= '1' && e.key <= '5') { stopAuto(); setMode(+e.key - 1, simTime); }
   else if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
   else if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('nohud');
   else if (e.key === 's' || e.key === 'S') document.getElementById('panel').classList.toggle('hidden');
@@ -1001,10 +1226,10 @@ function frame(dt) {
   const t = simTime;
   if (!eventsArmed && t > BOOT_SEC + 0.5) eventsArmed = true;
   if (isDemo()) applyStats(demoStats(t), Math.floor(t / 2) !== Math.floor((t - dt) / 2));
-  if (autoCycle && t - modeSince > MODE_SEC) setMode((modeB + 1) % 4, t);
+  if (autoCycle && t - modeSince > MODE_SEC) setMode((modeB + 1) % NMODE, t);
   blend = Math.min(1, blend + dt / 2.5);
   const e = blend * blend * (3 - 2 * blend);
-  const w = [0, 0, 0, 0]; w[modeA] += 1 - e; w[modeB] += e;
+  const w = [0, 0, 0, 0, 0]; w[modeA] += 1 - e; w[modeB] += e;
 
   // 开机
   const bt = clamp01(t / BOOT_SEC), boot = 1 - Math.pow(1 - bt, 3);
@@ -1046,15 +1271,15 @@ function frame(dt) {
     o.uni.uHead.value = (o.uni.uHead.value + dt * o.speed * spin + 1) % 1;
     const an = o.uni.uHead.value * Math.PI * 2;
     o.head.position.set(Math.cos(an) * o.rad, Math.sin(an) * o.rad, 0);
-    o.uni.uVis.value = 1 - 0.75 * w[1];
+    o.uni.uVis.value = (1 - 0.75 * w[1]) * (1 - 0.7 * w[4]);
     o.ring.rotation.z += dt * 0.05 * spin;
   });
   // 核心
-  const coreS = Math.max(0.001, (1 - 0.85 * w[1]) * (1 + 0.25 * pulse) * (0.3 + 0.7 * boot));
+  const coreS = Math.max(0.001, (1 - 0.85 * w[1]) * (1 - 0.92 * w[4]) * (1 + 0.25 * pulse) * (0.3 + 0.7 * boot));
   core.scale.setScalar(coreS);
   ico.rotation.x += dt * 0.21 * spin; ico.rotation.y -= dt * 0.17 * spin;
   oct.rotation.y += dt * 0.6 * spin; oct.rotation.z += dt * 0.33 * spin;
-  icoMat.opacity = 0.16 + 0.16 * load; octMat.opacity = 0.35 + 0.4 * load;
+  icoMat.opacity = 0.4 + 0.35 * load; octMat.opacity = 0.35 + 0.4 * load;
   glowUni.uI.value = (0.12 + 0.28 * load + 0.9 * pulse) * (1 - w[1]) * boot;
   // 电弧
   arcBoost = Math.max(0, arcBoost - dt * 1.6);
@@ -1073,6 +1298,20 @@ function frame(dt) {
   netUni.uVis.value = w[3];
   caps.forEach((c) => { c.element.style.opacity = w[3].toFixed(2); });
   segLabels.forEach((s) => { s.element.style.opacity = boot.toFixed(2); });
+  // v4：四维旋转、超立方、陀螺环、时序城
+  rot4.xw += dt * (0.16 + 0.14 * load) * spin; rot4.yw = 0.35 * Math.sin(t * 0.05); rot4.zw = 0.0;
+  shared.uXW.value = rot4.xw; shared.uYW.value = rot4.yw; shared.uZW.value = rot4.zw;
+  coreTess.upd();
+  sphereUni.uMorph.value = w[4];
+  bigTess.lines.visible = w[4] > 0.01;
+  if (bigTess.lines.visible) { bigTess.upd(); bigTess.uni.uA.value = w[4] * (0.75 + 0.25 * load); }
+  gimbals.forEach((gm, k) => {
+    gm.rotation.set(1.2 + 0.35 * k + Math.sin(t * 0.07 + k) * 0.25, t * (0.11 - 0.07 * k) * spin, 0.4 * k + Math.sin(t * 0.05 + 2 * k) * 0.3);
+    gm.material.uniforms.uVis.value = (1 - 0.8 * w[1]) * (0.7 + 0.6 * w[4]);
+    gm.scale.setScalar(1 + 0.12 * pulse);
+  });
+  { const kk = 1 - Math.exp(-dt * 3.0); for (let q = 0; q < cityShown.length; q++) cityShown[q] += (cityH[q] - cityShown[q]) * kk; if (cityAttr) cityAttr.needsUpdate = true; }
+  cityLabel.element.style.opacity = boot.toFixed(2);
   bloom.strength = (+document.getElementById('pBloom').value) * (1 + 0.8 * pulse + 0.4 * arcBoost);
 
   shared.uTime.value = t; shared.uBlend.value = blend; shared.uModeA.value = modeA; shared.uModeB.value = modeB; shared.uSpin.value = spin;
@@ -1080,7 +1319,7 @@ function frame(dt) {
 
   // 相机：缓慢环游 + 模式切换推近
   const punch = Math.sin(Math.PI * e) * (blend < 1 ? 1 : 0);
-  camera.position.set(lookX + Math.sin(t * 0.045) * 1.8 * spin, LOOK_Y + 0.4 + Math.sin(t * 0.031) * 0.4 * spin, camZ - 2.4 * punch + 6 * (1 - boot));
+  camera.position.set(lookX + Math.sin(t * 0.045) * 4.2 * spin, LOOK_Y + 0.4 + Math.sin(t * 0.031) * 1.6 * spin, camZ - 2.4 * punch + 6 * (1 - boot) + Math.sin(t * 0.023) * 1.5 * spin);
   camera.lookAt(lookX, LOOK_Y, 0);
   camera.updateMatrixWorld();
   billboards.forEach((m) => m.quaternion.copy(camera.quaternion));
@@ -1093,6 +1332,7 @@ function frame(dt) {
   finish.uniforms.uShock.value = ph; finish.uniforms.uShockAmp.value = w[2];
   finish.uniforms.uGlitch.value = blend < 0.22 ? Math.sin(Math.PI * blend / 0.22) : 0;
   finish.uniforms.uStreak.value = pStreak ? +pStreak.value : 0.22;
+  finish.uniforms.uRays.value = (0.45 + 0.9 * w[2] * (0.4 + pulse) + 0.5 * w[4]) * boot;
   finish.uniforms.uTime.value = t;
   if (modesEl) modesEl.style.setProperty('--prog', autoCycle ? clamp01((t - modeSince) / MODE_SEC).toFixed(3) : '1');
 
