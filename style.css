@@ -45,10 +45,36 @@ button.on { color: var(--ink); border-bottom-color: var(--acc); }
 #gear { font-size: 24px; padding: 2px 8px; }
 
 /* 底部四联：细线框 + 走势线 */
-#cards {
-  position: fixed; left: 36px; right: 36px; bottom: 24px;
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px;
-}
+#deck { position: fixed; left: 36px; right: 36px; bottom: 12px; }
+#cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.card .v small { overflow: hidden; text-overflow: ellipsis; }
+/* v5：实时工作流拓扑卡 */
+.card.wf { padding: 10px 14px 8px; background: linear-gradient(180deg, rgba(20,16,6,0.55), rgba(0,0,0,0.5)); }
+.card.wf .k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.card.wf .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9dffbf; margin-right: 8px; vertical-align: 2px; box-shadow: 0 0 8px #9dffbf; animation: blink 1.2s infinite; }
+.card.wf .dot.idle { background: var(--acc); box-shadow: 0 0 8px var(--acc); }
+@keyframes blink { 50% { opacity: .25; } }
+.wfbody { display: flex; gap: 10px; height: 84px; margin-top: 4px; }
+#wfGraph { flex: 1 1 auto; min-width: 0; height: 84px !important; margin: 0 !important; }
+#wfList { flex: 0 0 230px; height: 84px; overflow: hidden; position: relative; border-left: 1px solid var(--line); padding-left: 10px;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent); }
+#wfTrack { font-family: var(--num); font-size: 20px; line-height: 28px; white-space: nowrap; will-change: transform; }
+#wfTrack .ix { color: var(--acc); margin-right: 8px; font-variant-numeric: tabular-nums; }
+#wfTrack .hot { color: #fff; text-shadow: 0 0 8px var(--acc); }
+#wfTrack div { overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+/* v5：底部实时数据流跑马 */
+#ticker { display: flex; align-items: center; height: 38px; margin-top: 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  background: linear-gradient(90deg, rgba(255,207,122,0.06), rgba(0,0,0,0.35) 20%, rgba(0,0,0,0.35) 80%, rgba(255,207,122,0.06)); }
+#ticker .tag { flex: 0 0 auto; font-size: 20px; color: #000; background: var(--acc); padding: 2px 12px; margin-right: 12px; letter-spacing: 2px; font-weight: 600; }
+#tickWin { flex: 1 1 auto; overflow: hidden; height: 100%; position: relative;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); }
+#tickTrack { position: absolute; left: 0; top: 0; height: 100%; display: flex; align-items: center; white-space: nowrap; will-change: transform; }
+#tickTrack .ti { font-size: 20px; padding-right: 54px; color: var(--ink); font-variant-numeric: tabular-nums; position: relative; }
+#tickTrack .ti::after { content: "◆"; position: absolute; right: 20px; color: var(--acc); opacity: .6; font-size: 14px; top: 4px; }
+#tickTrack b { font-family: var(--num); font-weight: 600; color: #fff; margin-right: 6px; }
+#tickTrack .dim { color: var(--dim); }
+#tickTrack .ok, #tickTrack .run { color: #9dffbf; } #tickTrack .err { color: #ff8a8a; } #tickTrack .int, #tickTrack .pend { color: var(--acc); }
+#tickTrack .chain { color: var(--acc); font-family: var(--num); }
 .card { border: 1px solid var(--line); background: rgba(0,0,0,0.45); padding: 10px 16px 8px; position: relative; }
 .card::before, .card::after { content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--acc); border-style: solid; }
 .card::before { left: -1px; top: -1px; border-width: 2px 0 0 2px; }
@@ -149,7 +175,12 @@ body.capture *, body.capture *::before, body.capture *::after { transition: none
   #modes { order: 3; width: 100%; justify-content: space-around; gap: 2px; }
   #modes button { font-size: 14px; padding: 6px 4px; letter-spacing: 0; }
   .pill { font-size: 15px; padding: 3px 8px; }
-  #cards { left: 12px; right: 12px; bottom: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #deck { left: 12px; right: 12px; bottom: 10px; }
+  #cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .card.wf { grid-column: 1 / -1; order: 5; }
+  #wfList { display: none; }
+  .wfbody, #wfGraph { height: 54px !important; }
+  #ticker { height: 30px; } #ticker .tag { font-size: 14px; padding: 1px 6px; } #tickTrack .ti { font-size: 15px; }
   .card { padding: 8px 10px 6px; }
   .card .k { font-size: 14px; }
   .card .v small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }

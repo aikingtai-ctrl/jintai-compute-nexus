@@ -44,20 +44,20 @@ for (let v = 0; v < 16; v++) {
   for (let ax = 0; ax < 4; ax++) if (s[ax] === -1) T_EDGES.push([s, ax]);
 }
 const rot4 = { xw: 0, yw: 0, zw: 0 };
-function proj4(x, y, z, w, scale, out, o) {
-  let c = Math.cos(rot4.xw), s = Math.sin(rot4.xw), t;
+function proj4(x, y, z, w, scale, out, o, r = rot4) {
+  let c = Math.cos(r.xw), s = Math.sin(r.xw), t;
   t = c * x - s * w; w = s * x + c * w; x = t;
-  c = Math.cos(rot4.yw); s = Math.sin(rot4.yw); t = c * y - s * w; w = s * y + c * w; y = t;
-  c = Math.cos(rot4.zw); s = Math.sin(rot4.zw); t = c * z - s * w; w = s * z + c * w; z = t;
+  c = Math.cos(r.yw); s = Math.sin(r.yw); t = c * y - s * w; w = s * y + c * w; y = t;
+  c = Math.cos(r.zw); s = Math.sin(r.zw); t = c * z - s * w; w = s * z + c * w; z = t;
   const k = scale / (2.6 - w);
   out[o] = x * k; out[o + 1] = y * k; out[o + 2] = z * k;
   return w;
 }
-function fillTess(pos, wv, scale) {     // 32 棱 × 2 端点
+function fillTess(pos, wv, scale, r = rot4) {     // 32 棱 × 2 端点
   T_EDGES.forEach(([s, ax], e) => {
     const b = s.slice(); b[ax] = 1;
-    wv[e * 2] = proj4(s[0], s[1], s[2], s[3], scale, pos, e * 6);
-    wv[e * 2 + 1] = proj4(b[0], b[1], b[2], b[3], scale, pos, e * 6 + 3);
+    wv[e * 2] = proj4(s[0], s[1], s[2], s[3], scale, pos, e * 6, r);
+    wv[e * 2 + 1] = proj4(b[0], b[1], b[2], b[3], scale, pos, e * 6 + 3, r);
   });
 }
 
@@ -144,11 +144,14 @@ composer.addPass(new OutputPass());
 
 // ---------- 布局（所有模式节点位置固定） ----------
 const nodePos = [];
-for (let k = 0; k < N; k++) nodePos.push(new THREE.Vector3(15.2, 8.0 - k * 1.52 - (k >= 8 ? 0.7 : 0), 0));
+for (let k = 0; k < N; k++) {   // v5：纵深斜列——上近下远，向画面深处退去
+  const z = 3.2 - k * 1.0 - (k >= 8 ? 0.6 : 0);
+  nodePos.push(new THREE.Vector3(14.3 - z * 0.2, 8.0 - k * 1.52 - (k >= 8 ? 0.7 : 0), z));
+}
 const H1 = [], H2 = [];
 for (let i = 0; i < NH; i++) {
-  H1.push(new THREE.Vector3(2.6, SC.y + (2.5 - i) * 2.6, 0));
-  H2.push(new THREE.Vector3(8.9, SC.y + (2.5 - i) * 2.6, 0));
+  H1.push(new THREE.Vector3(2.6, SC.y + (2.5 - i) * 2.6, 3.0 - i * 0.5));
+  H2.push(new THREE.Vector3(8.9, SC.y + (2.5 - i) * 2.6, -1.5 - i * 0.6));
 }
 
 // ---------- 数据状态 ----------
@@ -157,7 +160,8 @@ for (let i = 0; i < N; i++) nodes.push({ id: i < 8 ? `A${i}` : `B${i - 8}`, mach
   online: false, frac: 0, fracShown: 0, amp: 0, ampShown: 0, html: '', raw: {}, prev: null, rip: -99 });
 let lastOk = 0, everOk = false, fallbackDemo = false, eventsArmed = false;
 const isDemo = () => ONLY_SIM || fallbackDemo;
-const hist = { vram: [], ram: [], bram: [], power: [] };
+const hist = { vram: [], ram: [], bram: [], power: [], tok: [] };
+let lastJ = null;
 const HMAX = 120;
 const agg = { aVramPct: null, online: 0 };
 
@@ -268,7 +272,8 @@ const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(200, 120), new THREE.Sha
       gl_FragColor = vec4(col * uBoot, 1.0);
     }`,
 }));
-backdrop.position.set(SC.x, SC.y, -48);
+backdrop.position.set(SC.x, SC.y, -150);
+backdrop.scale.setScalar(2.6);
 scene.add(backdrop);
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(260, 170), new THREE.ShaderMaterial({
   uniforms: { ...shared, uCam: { value: new THREE.Vector3() } }, ...ADD,
@@ -280,14 +285,15 @@ const floor = new THREE.Mesh(new THREE.PlaneGeometry(260, 170), new THREE.Shader
       vec2 d = abs(fract(g + 0.5) - 0.5) / fwidth(g);
       float line = 1.0 - min(min(d.x, d.y), 1.0);
       float dist = length(vW.xz - uCam.xz);
-      float fade = smoothstep(140.0, 40.0, dist) * smoothstep(10.0, 34.0, dist);
+      float fade = smoothstep(300.0, 40.0, dist) * smoothstep(10.0, 34.0, dist);
       float wave = exp(-pow(fract(-vW.z * 0.012 + uTime * 0.06) - 0.5, 2.0) * 900.0);
       vec3 col = mix(uWhite * 0.05, uAcc * 0.14, wave) * line * fade;
       gl_FragColor = vec4(col * uBoot, 1.0);
     }`,
 }));
 floor.rotation.x = -Math.PI / 2;
-floor.position.set(0, -13.5, -55);
+floor.position.set(0, -13.5, -150);
+floor.scale.set(2.4, 2.6, 1);
 scene.add(floor);
 
 // ---------- 主体球：斐波那契点阵 + 近邻细线网 + 扫描带 ----------
@@ -429,7 +435,7 @@ const core = new THREE.Group();
 core.position.copy(SC);
 scene.add(core);
 const octMat = new THREE.LineBasicMaterial({ color: 0xffcf7a, ...ADD, opacity: 0.55 });
-function makeTess(scale, ptSize) {
+function makeTess(scale, ptSize, rr = rot4) {
   const pos = new Float32Array(64 * 3), wv = new Float32Array(64);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -446,7 +452,7 @@ function makeTess(scale, ptSize) {
     fragmentShader: ROUND_FS }));
   lines.frustumCulled = pts.frustumCulled = false;
   lines.add(pts);
-  return { lines, pos, wv, g, scale, uni, upd() { fillTess(pos, wv, scale); g.attributes.position.needsUpdate = true; g.attributes.aW.needsUpdate = true; } };
+  return { lines, pos, wv, g, scale, uni, r: rr, upd() { fillTess(pos, wv, scale, rr); g.attributes.position.needsUpdate = true; g.attributes.aW.needsUpdate = true; } };
 }
 const coreTess = makeTess(2.6, 0.22);
 const ico = coreTess.lines;
@@ -577,9 +583,11 @@ const dial = new THREE.Mesh(new THREE.PlaneGeometry(DIAL * 2, DIAL * 2), new THR
       gl_FragColor = vec4(col * uVis, 1.0);
     }`,
 }));
-dial.position.copy(SC);
-scene.add(dial);
-billboards.push(dial);
+const dialGroup = new THREE.Group();
+dialGroup.position.copy(SC);
+dialGroup.rotation.set(-0.12, 0.42, 0.04);
+scene.add(dialGroup);
+dialGroup.add(dial);
 
 // ---------- 流线（细丝）、粒子、数据包彗尾 ----------
 {
@@ -744,15 +752,46 @@ const netUni = { uTime: shared.uTime, uVis: { value: 0 }, uNodeAmp: shared.uNode
 
 // ---------- 右侧总线导轨 ----------
 {
-  const top = nodePos[0].y + 0.95, bot = nodePos[N - 1].y - 0.95;
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([15.2, top, -0.05, 15.2, bot, -0.05]), 3));
-  g.setAttribute('aU', new THREE.BufferAttribute(new Float32Array([0, 1]), 1));
-  scene.add(new THREE.LineSegments(g, new THREE.ShaderMaterial({ uniforms: shared, ...ADD,
+  const pts = [nodePos[0].clone().add(new THREE.Vector3(0.2, 0.95, 1.0)), ...nodePos, nodePos[N - 1].clone().add(new THREE.Vector3(-0.2, -0.95, -1.0))];
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  g.setAttribute('aU', new THREE.BufferAttribute(new Float32Array(pts.map((_, i) => i / (pts.length - 1))), 1));
+  scene.add(new THREE.Line(g, new THREE.ShaderMaterial({ uniforms: shared, ...ADD,
     vertexShader: `attribute float aU; varying float vU; void main(){ vU = aU; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform float uTime, uBoot; uniform vec3 uWhite, uAcc; varying float vU;
       void main(){ float dash = step(0.55, fract(vU * 90.0 - uTime * 2.0)); float run = exp(-pow((fract(uTime * 0.25) - vU) * 18.0, 2.0));
         gl_FragColor = vec4(mix(uWhite, uAcc, run), (0.08 + 0.18 * dash + 0.7 * run) * step(vU, uBoot * 1.05)); }` })));
+}
+
+// ================= v5 无尽纵深层 =================
+const VP = new THREE.Vector2(-3.0, -1.0);            // 消失点（略偏主体球）
+{   // 曲速星流：从数百单位深处向镜头飞来的拉丝光点
+  const n = 1700, seed = new Float32Array(n * 2 * 4), end = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { const sd = [Math.random(), Math.random(), Math.random(), Math.random()]; seed.set(sd, i * 8); seed.set(sd, i * 8 + 4); end[i * 2] = 0; end[i * 2 + 1] = 1; }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 2 * 3), 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+  g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
+  const warp = new THREE.LineSegments(g, new THREE.ShaderMaterial({ uniforms: { ...shared, uVP: { value: VP } }, ...ADD,
+    vertexShader: `uniform float uTime, uBoot; uniform vec2 uVP; uniform vec3 uWhite, uAcc; attribute vec4 aSeed; attribute float aEnd; varying float vA; varying vec3 vC;
+      void main(){
+        float ph = fract(aSeed.w + uTime * (0.012 + 0.03 * aSeed.z));
+        float z = mix(-360.0, 26.0, ph);
+        float an = aSeed.x * 6.2832, r = 9.0 + pow(aSeed.y, 0.75) * 85.0;
+        vec3 p = vec3(uVP.x + cos(an) * r, uVP.y + sin(an) * r * 0.62, z);
+        p.z -= aEnd * (0.6 + 16.0 * smoothstep(-220.0, 26.0, z));
+        vA = smoothstep(0.0, 0.2, ph) * smoothstep(1.0, 0.9, ph) * (0.18 + 0.5 * aSeed.z) * (1.0 - 0.85 * aEnd) * uBoot;
+        vC = mix(uWhite, uAcc, step(0.86, aSeed.y));
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `varying float vA; varying vec3 vC; void main(){ gl_FragColor = vec4(vC, vA); }` }));
+  warp.frustumCulled = false;
+  scene.add(warp);
+}
+const tunnel = [];
+for (let k = 0; k < 7; k++) {   // 超立方隧道：七重四维立方由远及近穿过，形成无尽回廊
+  const T = makeTess(30, 1.4, { xw: k * 0.9, yw: k * 0.4, zw: 0 });
+  scene.add(T.lines);
+  tunnel.push({ T });
 }
 
 // ================= v4 多维层 =================
@@ -925,10 +964,11 @@ const segLabels = [];
 for (let i = 0; i < 8; i++) {
   const a = (i + 0.5) / 8 * Math.PI * 2;   // 与着色器一致：顶部起顺时针
   const r = 12.2;
-  segLabels.push(addLabel('segnum', `0${i}`, new THREE.Vector3(SC.x + Math.sin(a) * r, SC.y + Math.cos(a) * r, 0)));
+  const o = addLabel('segnum', `0${i}`, new THREE.Vector3(Math.sin(a) * r, Math.cos(a) * r, 0));
+  dialGroup.add(o); segLabels.push(o);
 }
-const caps = [['任务编排', H1[0].x], ['资源分配', H2[0].x], ['GPU 执行', nodePos[0].x]]
-  .map(([t, x]) => addLabel('hlabel', t, new THREE.Vector3(x, 9.7, 0)));
+const caps = [['任务编排', H1[0]], ['资源分配', H2[0]], ['GPU 执行', nodePos[0]]]
+  .map(([t, p], i) => addLabel('hlabel', t, new THREE.Vector3(p.x, i === 2 ? p.y + 1.1 : 9.7, p.z)));
 const cityLabel = addLabel('hlabel city', '显存时序 · 12 卡 × 48 秒', new THREE.Vector3(CITY.x - 0.4, CITY.y - 0.5, CITY.z + 0.6), 0, 0);
 
 // ---------- 事件（任务开始/完成/排队/上下线）：节点涟漪 + 浮动提示 + 事件流 ----------
@@ -1011,6 +1051,7 @@ function nodeHtml(n) {
 function push(arr, v) { if (v === null || v === undefined || Number.isNaN(v)) return; arr.push(v); if (arr.length > HMAX) arr.shift(); }
 
 function applyStats(j, record) {
+  lastJ = j;
   const list = [...(j.a?.gpus || []), ...(j.b?.gpus || [])];
   for (let i = 0; i < N; i++) {
     const n = nodes[i], g = list.find((x) => x.id === n.id) || {};
@@ -1051,7 +1092,8 @@ function applyStats(j, record) {
   setText('coreT3', `在线 ${agg.online}/12 · 显存 ${fmt(agg.aVramPct, 0)}%`);
   if (record) {
     push(hist.vram, agg.aVramPct); push(hist.ram, aRam); push(hist.bram, bRam);
-    push(hist.power, g3.online ? g3.power_w : null);
+    push(hist.power, g3.online ? g3.power_w : null); push(hist.tok, q.online ? q.tok_s * 3 : null);
+    refreshTicks(j, used, tot, run, pend);
     drawSparks();
   }
 }
@@ -1063,8 +1105,8 @@ function prepCanvas(id) {
   if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
   const x = c.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h); return [x, w, h];
 }
-function spark(id, series, lo, hi, colors) {
-  const [x, w, h] = prepCanvas(id);
+function spark(id, series, lo, hi, colors, wf = 1) {
+  const [x, w0, h] = prepCanvas(id); const w = w0 * wf;
   x.strokeStyle = 'rgba(255,255,255,0.10)'; x.lineWidth = 1;
   for (let k = 1; k < 4; k++) { x.beginPath(); x.moveTo(0, Math.round(h * k / 4) + 0.5); x.lineTo(w, Math.round(h * k / 4) + 0.5); x.stroke(); }
   for (let k = 1; k < 12; k++) { const gx = Math.round(w * k / 12) + 0.5; x.strokeStyle = 'rgba(255,255,255,0.05)'; x.beginPath(); x.moveTo(gx, 0); x.lineTo(gx, h); x.stroke(); }
@@ -1080,9 +1122,17 @@ function spark(id, series, lo, hi, colors) {
   });
 }
 function drawSparks() {
-  spark('spVram', [hist.vram], 0, 100, [pal.white]);
+  spark('spVram', [hist.vram], 0, 100, [pal.white], 0.6);
+  {   // 8 卡显存实时柱
+    const c = document.getElementById('spVram'), x = c.getContext('2d'), w = c.clientWidth, h = c.clientHeight, x0 = w * 0.66, bw = (w - x0) / 8;
+    nodes.slice(0, 8).forEach((n, i) => {
+      const hh = Math.max(2, (h - 4) * (n.online ? n.frac : 0));
+      x.fillStyle = 'rgba(255,255,255,0.08)'; x.fillRect(x0 + i * bw + bw * 0.18, 2, bw * 0.64, h - 4);
+      x.fillStyle = n.raw && n.raw.running ? pal.acc : pal.white; x.fillRect(x0 + i * bw + bw * 0.18, h - 2 - hh, bw * 0.64, hh);
+    });
+  }
   spark('spRam', [hist.ram, hist.bram], 0, 100, [pal.white, pal.acc]);
-  spark('spB', [hist.power], 0, 600, [pal.acc]);
+  spark('spB', [hist.power, hist.tok], 0, 600, [pal.acc, pal.white]);
   // 任务：12 根竖条（运行=白、排队=金）
   const [x, w, h] = prepCanvas('spJobs');
   const bw = w / N;
@@ -1097,6 +1147,134 @@ function drawSparks() {
   });
 }
 
+
+// ================= v5 底部：实时工作流拓扑 + 实时数据流跑马 =================
+const DEMO_WF = { types: ['UNETLoader', 'CLIPLoader', 'VAELoader', 'LoadImage', 'LoraLoaderModelOnly', 'CLIPTextEncode', 'MiniMaxH3ReferenceToVideo', 'ConditioningZeroOut', 'ModelSamplingSD3', 'SelfLiftH3Sampler', 'VAEDecodeTiled', 'CreateVideo', 'SaveVideo'],
+  links: [[0, 4], [4, 8], [1, 5], [5, 6], [3, 6], [2, 6], [5, 7], [8, 9], [6, 9], [7, 9], [9, 10], [2, 10], [10, 11], [11, 12]] };
+const DEMO_IMG = { types: ['UNETLoader', 'CLIPLoader', 'VAELoader', 'MiniMaxH3ImageConditioning', 'ConditioningZeroOut', 'KSampler', 'VAEDecode', 'SaveImage', 'EmptyLatentImage', 'CLIPTextEncode', 'ModelSamplingAuraFlow'],
+  links: [[0, 10], [10, 5], [1, 9], [9, 3], [2, 3], [3, 5], [9, 4], [4, 5], [8, 5], [5, 6], [2, 6], [6, 7]] };
+function hexId(k) { return ((Math.abs(Math.sin(k * 12.9898 + 4.1)) * 4294967295) >>> 0).toString(16).padStart(8, '0').slice(0, 8); }
+const gpuName = (id) => (id && id[0] === 'A' ? `H100·${id.slice(1)}` : `5090·${(id || '').slice(1)}`);
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtDur = (sec) => { if (sec == null) return '--'; sec = Math.max(0, sec); return sec >= 60 ? `${Math.floor(sec / 60)}分${String(Math.floor(sec % 60)).padStart(2, '0')}秒` : `${sec.toFixed(0)}秒`; };
+function wfCat(t) {
+  if (/Sampler|Sample\b|KSampler/i.test(t)) return 3;
+  if (/Save|Preview|Combine|Output|CreateVideo/i.test(t)) return 4;
+  if (/Loader|^Load/i.test(t)) return 0;
+  if (/Decode|VAE/i.test(t)) return 2;
+  return 1;
+}
+function salient(types) {
+  const ts = (types || []).filter((x) => !/^(Note|Reroute|PrimitiveNode|Node)$/.test(x));
+  if (ts.length <= 3) return ts.join(' → ');
+  const smp = ts.find((x) => wfCat(x) === 3) || ts[Math.floor(ts.length / 2)];
+  return [ts[0], smp, ts[ts.length - 1]].join(' → ');
+}
+function layoutWF(types, links) {
+  const n = types.length, layer = new Array(n).fill(0);
+  if (links && links.length) {
+    for (let it = 0; it < n; it++) { let ch = false; for (const [a, b] of links) if (a < n && b < n && layer[b] < layer[a] + 1 && layer[a] < n) { layer[b] = layer[a] + 1; ch = true; } if (!ch) break; }
+  } else for (let i = 0; i < n; i++) layer[i] = i;
+  const L = Math.max(1, ...layer.map((v) => v + 1)), rows = Array.from({ length: L }, () => []);
+  layer.forEach((l, i) => rows[l].push(i));
+  const pos = []; rows.forEach((r, l) => r.forEach((i, k) => { pos[i] = [(l + 0.5) / L, (k + 0.5) / r.length]; }));
+  return { pos, layer, L };
+}
+const wfTitle = document.getElementById('wfTitle'), wfTrack = document.getElementById('wfTrack'), wfDot = document.querySelector('.card.wf .dot');
+let wfKey = '', wfLay = null, wfJob = null, wfHot = -1;
+function drawWF(t) {
+  if (!wfTitle) return;
+  const jobs = (lastJ?.a?.gpus || []).filter((g) => g.job && g.job.types && g.job.types.length);
+  let job = null, title = '实时工作流 · 暂无运行任务', live = false;
+  if (jobs.length) {
+    const k = ((Math.floor(t / 6) % jobs.length) + jobs.length) % jobs.length, g = jobs[k]; job = g.job; live = true;
+    title = `实时工作流 ${k + 1}/${jobs.length} · ${gpuName(g.id)} · ${job.n ?? job.types.length} 节点 · 已运行 ${fmtDur(job.elapsed)} · #${job.id}`;
+  } else if (lastJ?.recent?.length) {
+    const r = lastJ.recent[0]; job = { types: r.types || [], links: [], id: r.id, n: r.nodes };
+    title = `最近完成 · ${gpuName(r.gpu)} · #${r.id} · ${r.nodes ?? '--'} 节点 · ${fmt(r.dur, 1)}秒 ${r.status === 'ok' ? '✓' : r.status === 'err' ? '✗' : '■'}`;
+  }
+  setText('wfTitle', title);
+  if (wfDot) wfDot.classList.toggle('idle', !live);
+  const key = job ? `${job.id}:${job.types.length}` : '';
+  if (key !== wfKey) {
+    wfKey = key; wfJob = job; wfLay = job ? layoutWF(job.types, job.links || []) : null; wfHot = -1;
+    if (wfTrack) {
+      const items = job ? job.types.map((ty, i) => `<div data-l="${wfLay.layer[i]}"><span class="ix">${String(i + 1).padStart(2, '0')}</span>${esc(ty)}</div>`).join('') : '';
+      wfTrack.innerHTML = items + items;   // 双份实现无缝循环
+    }
+  }
+  const [x, w, h] = prepCanvas('wfGraph');
+  if (!wfLay || !wfJob) return;
+  const n = wfJob.types.length, px = 12, py = 9, L = wfLay.L;
+  const P = wfLay.pos.map(([u, v]) => [px + u * (w - 2 * px), py + v * (h - 2 * py)]);
+  const scan = (t * 0.16) % 1.15 - 0.075, hotL = Math.floor(Math.max(0, Math.min(0.999, scan)) * L);
+  x.strokeStyle = 'rgba(255,255,255,0.05)'; x.lineWidth = 1;
+  for (let l = 0; l <= L; l++) { const gx = Math.round(px + l / L * (w - 2 * px)) + 0.5; x.beginPath(); x.moveTo(gx, 2); x.lineTo(gx, h - 2); x.stroke(); }
+  const links = (wfJob.links && wfJob.links.length) ? wfJob.links : Array.from({ length: n - 1 }, (_, i) => [i, i + 1]);
+  links.forEach(([a, b], li) => {
+    if (!P[a] || !P[b]) return;
+    const [x1, y1] = P[a], [x2, y2] = P[b], mx = (x2 - x1) * 0.5;
+    x.strokeStyle = 'rgba(255,255,255,0.20)'; x.lineWidth = 1;
+    x.beginPath(); x.moveTo(x1, y1); x.bezierCurveTo(x1 + mx, y1, x2 - mx, y2, x2, y2); x.stroke();
+    const u = (t * 0.55 + li * 0.137) % 1, iu = 1 - u;   // 链路数据脉冲
+    const bx = iu * iu * iu * x1 + 3 * iu * iu * u * (x1 + mx) + 3 * iu * u * u * (x2 - mx) + u * u * u * x2;
+    const by = iu * iu * iu * y1 + 3 * iu * iu * u * y1 + 3 * iu * u * u * y2 + u * u * u * y2;
+    x.fillStyle = pal.acc; x.globalAlpha = 0.9; x.beginPath(); x.arc(bx, by, 1.8, 0, 6.2832); x.fill(); x.globalAlpha = 1;
+  });
+  const sx = px + scan * (w - 2 * px);
+  const gr = x.createLinearGradient(sx - 40, 0, sx + 4, 0); gr.addColorStop(0, 'rgba(255,207,122,0)'); gr.addColorStop(1, 'rgba(255,207,122,0.22)');
+  x.fillStyle = gr; x.fillRect(sx - 40, 1, 44, h - 2);
+  const nw = Math.max(7, Math.min(26, (w - 2 * px) / L * 0.5));
+  const COL = ['rgba(230,236,245,0.55)', '#9fd8ff', '#ffffff', pal.acc, '#9dffbf'];
+  wfJob.types.forEach((ty, i) => {
+    if (!P[i]) return;
+    const c = wfCat(ty), hot = wfLay.layer[i] === hotL, hh = c === 3 ? 11 : 7, ww = c === 3 ? nw * 1.3 : nw;
+    x.fillStyle = COL[c]; x.shadowColor = COL[c]; x.shadowBlur = hot || c === 3 ? 10 : 0;
+    x.globalAlpha = hot ? 1 : 0.8; x.fillRect(P[i][0] - ww / 2, P[i][1] - hh / 2, ww, hh); x.globalAlpha = 1; x.shadowBlur = 0;
+    if (hot) { x.strokeStyle = '#fff'; x.lineWidth = 1; x.strokeRect(P[i][0] - ww / 2 - 2.5, P[i][1] - hh / 2 - 2.5, ww + 5, hh + 5); }
+  });
+  if (wfTrack) {
+    const rows = n * 28; wfTrack.style.transform = `translate3d(0, ${(-(t * 16) % rows).toFixed(1)}px, 0)`;
+    if (hotL !== wfHot) { wfHot = hotL; for (const el of wfTrack.children) el.classList.toggle('hot', +el.dataset.l === hotL); }
+  }
+}
+
+const tickWin = document.getElementById('tickWin'), tickTrack = document.getElementById('tickTrack');
+let tickWinW = tickWin ? tickWin.clientWidth : 0, tickX = 0, tickW = 0, tickIdx = 0, tickPool = [];
+const tickItems = [];
+function refreshTicks(j, used, tot, run, pend) {
+  const T = [], a = j.a || {}, b = j.b || {};
+  T.push(`<b>集群</b>在线 ${agg.online}/12 <span class="dim">·</span> A机显存 ${fmt(used)}/${fmt(tot, 0)} GiB <span class="dim">·</span> <span class="run">运行 ${run}</span> <span class="dim">·</span> <span class="pend">排队 ${pend}</span>`);
+  (a.gpus || []).forEach((g) => {
+    if (!g.online) { T.push(`<b>${gpuName(g.id)}</b><span class="err">离线</span>`); return; }
+    const jb = g.job ? ` <span class="dim">·</span> ${g.job.n ?? g.job.types.length} 节点 <span class="chain">${esc(salient(g.job.types))}</span> <span class="dim">· 已运行 ${fmtDur(g.job.elapsed)}</span>` : '';
+    T.push(`<b>${gpuName(g.id)}</b>显存 ${fmt(g.vram_used)}<span class="dim">/${fmt(g.vram_total, 0)}G</span> ${g.running ? '<span class="run">▶ 运行</span>' : '<span class="dim">空闲</span>'}${g.pending ? ` <span class="pend">⏳ 排队 ${g.pending}</span>` : ''}${jb}`);
+  });
+  (j.recent || []).slice(0, 8).forEach((r) => {
+    const st = r.status === 'ok' ? '<span class="ok">✓ 完成</span>' : r.status === 'err' ? `<span class="err">✗ 报错${r.err_node ? ' @' + esc(r.err_node) : ''}</span>` : '<span class="int">■ 中断</span>';
+    T.push(`${st} <b>${gpuName(r.gpu)}</b><span class="dim">#${r.id}</span> ${r.nodes ?? '--'} 节点 <span class="dim">·</span> 耗时 ${fmt(r.dur, 1)} 秒 <span class="chain">${esc(salient(r.types))}</span>`);
+  });
+  const bg = b.gpus || [], q = bg[0] || {}, g3 = bg[3] || {};
+  T.push(`<b>5090·0</b>Qwen3.8 ${q.online ? `<span class="run">${fmt(q.tok_s)} tok/s</span>` : '<span class="err">未上线</span>'}`);
+  T.push(`<b>5090·3</b>ComfyUI ${g3.online ? `${fmt(g3.temp_c, 0)}°C <span class="dim">·</span> ${fmt(g3.power_w, 0)} W <span class="dim">·</span> 利用率 ${fmt(g3.util_pct, 0)}%` : '<span class="err">未上线</span>'}`);
+  T.push(`<b>5090·1</b>Blender ${bg[1]?.online ? '<span class="run">在线</span>' : '<span class="dim">未上线</span>'} <span class="dim">·</span> <b>5090·2</b>Topaz ${bg[2]?.online ? '<span class="run">在线</span>' : '<span class="dim">未上线</span>'}`);
+  T.push(`<b>采集</b>每 2 秒 <span class="dim">·</span> 本轮轮询 ${j.poll_ms ?? '--'} ms <span class="dim">·</span> ComfyUI ×9 /queue /history <span class="dim">·</span> NVML`);
+  tickPool = T;
+}
+function tickAppend() {
+  const el = document.createElement('span'); el.className = 'ti'; el.innerHTML = tickPool[tickIdx++ % tickPool.length];
+  tickTrack.appendChild(el); const w = el.offsetWidth; tickItems.push({ el, w }); tickW += w;
+}
+function tickStep(dt) {
+  if (!tickTrack || !tickPool.length) return;
+  if (!tickWinW) tickWinW = tickWin.clientWidth;
+  let guard = 0;
+  while (tickW + tickX < tickWinW + 300 && guard++ < 20) tickAppend();
+  tickX -= dt * 85;
+  while (tickItems.length && tickX + tickItems[0].w < 0) { const f = tickItems.shift(); tickX += f.w; tickW -= f.w; f.el.remove(); }
+  tickTrack.style.transform = `translate3d(${tickX.toFixed(1)}px, 0, 0)`;
+}
+
 function demoStats(t) {   // 公网静态托管或未连接采集服务时使用的仿真数据，状态栏会明确标注
   const A = [], B = [];
   for (let i = 0; i < 8; i++) {
@@ -1109,7 +1287,11 @@ function demoStats(t) {   // 公网静态托管或未连接采集服务时使用
     { id: 'B2', online: true, running: Math.sin(t * 0.06 + 2) > 0.4 ? 1 : 0 },
     { id: 'B3', online: true, vram_total: 31.8, vram_used: 18.4 + 6 * Math.sin(t * 0.05), temp_c: 44 + 5 * Math.sin(t * 0.04), power_w: 235 + 65 * Math.sin(t * 0.08), util_pct: 62 },
   );
-  return { ok: true, a: { online: 8, ram_total: 1007, ram_free: 365 + 45 * Math.sin(t * 0.03), gpus: A }, b: { online: 4, ram_total: 252, ram_free: 142 + 18 * Math.cos(t * 0.04), gpus: B } };
+  A.forEach((g, i) => { if (g.running) { const T = i % 3 === 1 ? DEMO_IMG : DEMO_WF; g.job = { ...T, n: T.types.length, id: hexId(i * 131 + Math.floor((t * 0.11 + i * 1.7) / 6.28)), elapsed: ((t * 0.11 + i * 1.7) % 6.28) / 0.11 }; } });
+  const recent = [];
+  for (let k = 0; k < 10; k++) { const T = k % 3 === 1 ? DEMO_IMG : DEMO_WF; const st = k % 7 === 5 ? 'int' : (k % 11 === 9 ? 'err' : 'ok');
+    recent.push({ gpu: `A${(k * 3 + Math.floor(t / 20)) % 8}`, id: hexId(k * 977 + Math.floor(t / 20)), status: st, nodes: T.types.length, dur: T === DEMO_IMG ? 36 + (k * 7) % 5 : 180 + (k * 53) % 260, types: T.types.slice(0, 14), err_node: st === 'err' ? 'VAEDecodeTiled' : null }); }
+  return { ok: true, poll_ms: 180, recent, a: { online: 8, ram_total: 1007, ram_free: 365 + 45 * Math.sin(t * 0.03), gpus: A }, b: { online: 4, ram_total: 252, ram_free: 142 + 18 * Math.cos(t * 0.04), gpus: B } };
 }
 const bootAt = Date.now();
 let publicApiUrl = '', failCount = 0;
@@ -1158,7 +1340,7 @@ async function poll() {
     const j = await r.json();
     if (!j.ok || !j.a) throw new Error('no data');
     if (!everOk) {
-      hist.vram.length = hist.ram.length = hist.bram.length = hist.power.length = 0;
+      hist.vram.length = hist.ram.length = hist.bram.length = hist.power.length = hist.tok.length = 0;
       nodes.forEach((n) => { n.prev = null; });   // 仿真→真实切换不触发假事件
     }
     failCount = 0;
@@ -1213,10 +1395,11 @@ addEventListener('resize', () => {
   camZ = getCamZ(); lookX = getLookX();
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); labelRenderer.setSize(innerWidth, innerHeight);
   shared.uPR.value = renderer.getPixelRatio() * innerHeight / 1080; finish.uniforms.uRes.value.set(innerWidth, innerHeight); drawSparks();
+  tickWinW = tickWin ? tickWin.clientWidth : 0;
 });
 
 // ---------- 帧循环 ----------
-let simTime = 0, arcClock = 0;
+let simTime = 0, arcClock = 0, deckTopT = -1, deckTopC = 9999;
 const bootEl = document.getElementById('boot'), modesEl = document.getElementById('modes');
 const bootLines = bootEl ? [...bootEl.querySelectorAll('.bl')] : [];
 const _v = new THREE.Vector3();
@@ -1297,7 +1480,9 @@ function frame(dt) {
   hMarkers.forEach((m) => { m.material.uniforms.uVis.value = w[3]; m.visible = w[3] > 0.01; });
   netUni.uVis.value = w[3];
   caps.forEach((c) => { c.element.style.opacity = w[3].toFixed(2); });
-  segLabels.forEach((s) => { s.element.style.opacity = boot.toFixed(2); });
+  { if (Math.floor(t) !== deckTopT) { deckTopT = Math.floor(t); deckTopC = (document.getElementById('deck')?.getBoundingClientRect().top ?? innerHeight) - 10; } const dTop = deckTopC;
+    segLabels.forEach((s) => { _v.setFromMatrixPosition(s.matrixWorld).project(camera); const sy = (1 - _v.y) * 0.5 * innerHeight;
+      s.element.style.opacity = (sy > dTop || sy < 84 ? 0 : boot).toFixed(2); }); }
   // v4：四维旋转、超立方、陀螺环、时序城
   rot4.xw += dt * (0.16 + 0.14 * load) * spin; rot4.yw = 0.35 * Math.sin(t * 0.05); rot4.zw = 0.0;
   shared.uXW.value = rot4.xw; shared.uYW.value = rot4.yw; shared.uZW.value = rot4.zw;
@@ -1319,8 +1504,23 @@ function frame(dt) {
 
   // 相机：缓慢环游 + 模式切换推近
   const punch = Math.sin(Math.PI * e) * (blend < 1 ? 1 : 0);
-  camera.position.set(lookX + Math.sin(t * 0.045) * 4.2 * spin, LOOK_Y + 0.4 + Math.sin(t * 0.031) * 1.6 * spin, camZ - 2.4 * punch + 6 * (1 - boot) + Math.sin(t * 0.023) * 1.5 * spin);
-  camera.lookAt(lookX, LOOK_Y, 0);
+  {
+    const yaw = (0.05 + 0.13 * Math.sin(t * 0.037)) * spin, pitch = (0.08 + 0.05 * Math.sin(t * 0.029)) * spin;
+    const rad = camZ - 2.4 * punch + 6 * (1 - boot) + Math.sin(t * 0.023) * 1.5 * spin;
+    camera.position.set(lookX + Math.sin(yaw) * Math.cos(pitch) * rad, LOOK_Y + 0.4 + Math.sin(pitch) * rad, Math.cos(yaw) * Math.cos(pitch) * rad);
+    camera.up.set(Math.sin(0.03 * Math.sin(t * 0.043) * spin), 1, 0).normalize();
+    camera.lookAt(lookX, LOOK_Y, 0);
+  }
+  dialGroup.rotation.set(-0.12 + 0.04 * Math.sin(t * 0.05), 0.42 + 0.06 * Math.sin(t * 0.07), 0.04);
+  // 无尽纵深：超立方隧道向镜头推进并循环
+  tunnel.forEach((tn, k) => {
+    const ph = (k / tunnel.length + t * 0.011) % 1;
+    tn.T.lines.position.set(VP.x, VP.y, -330 + ph * 290);
+    tn.T.lines.rotation.z = t * 0.025 * (k % 2 ? -1 : 1) + k * 0.7;
+    tn.T.r.xw += dt * (0.12 + 0.03 * k); tn.T.r.yw = 0.3 * Math.sin(t * 0.05 + k);
+    tn.T.uni.uA.value = Math.min(1, ph / 0.3) * Math.min(1, (1 - ph) / 0.25) * 0.32 * boot * (1 - 0.6 * w[1]);
+    tn.T.upd();
+  });
   camera.updateMatrixWorld();
   billboards.forEach((m) => m.quaternion.copy(camera.quaternion));
   floor.material.uniforms.uCam.value.copy(camera.position);
@@ -1336,6 +1536,7 @@ function frame(dt) {
   finish.uniforms.uTime.value = t;
   if (modesEl) modesEl.style.setProperty('--prog', autoCycle ? clamp01((t - modeSince) / MODE_SEC).toFixed(3) : '1');
 
+  drawWF(t); tickStep(dt);
   updateStatus();
   composer.render();
   labelRenderer.render(scene, camera);
@@ -1344,6 +1545,6 @@ function frame(dt) {
 if (CAPTURE) { window.__advance = (dt) => frame(dt); frame(0.0001); window.__ready = true; }
 else {
   let last = performance.now();
-  const loop = (now) => { const dt = Math.min(0.05, (now - last) / 1000); last = now; frame(dt); requestAnimationFrame(loop); };
+  const loop = (now) => { const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; frame(dt); requestAnimationFrame(loop); };
   requestAnimationFrame(loop); window.__ready = true;
 }

@@ -46,7 +46,8 @@
   </div>
 </header>
 
-<section id="cards" class="hud">
+<section id="deck" class="hud">
+ <div id="cards">
   <div class="card">
     <div class="k">A机 · 8×H100 显存</div>
     <div class="v"><b id="aVram">--</b><small id="aVramT"> / -- GiB</small></div>
@@ -56,6 +57,10 @@
     <div class="k">任务 · 运行 / 排队</div>
     <div class="v"><b id="jobs">--</b><small id="jobsT"></small></div>
     <canvas id="spJobs"></canvas>
+  </div>
+  <div class="card wf">
+    <div class="k"><span class="dot"></span><span id="wfTitle">实时工作流</span></div>
+    <div class="wfbody"><canvas id="wfGraph"></canvas><div id="wfList"><div id="wfTrack"></div></div></div>
   </div>
   <div class="card">
     <div class="k">内存 · A机 1TB / B机</div>
@@ -67,6 +72,8 @@
     <div class="v"><b id="bOnline">--</b><small id="bT"></small></div>
     <canvas id="spB"></canvas>
   </div>
+ </div>
+ <div id="ticker"><span class="tag">实时数据流</span><div id="tickWin"><div id="tickTrack"></div></div></div>
 </section>
 
 <aside id="panel" class="hud hidden">
