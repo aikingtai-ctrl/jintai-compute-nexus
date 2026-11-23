@@ -54,9 +54,9 @@ button.on { color: var(--ink); border-bottom-color: var(--acc); }
 .card.wf .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9dffbf; margin-right: 8px; vertical-align: 2px; box-shadow: 0 0 8px #9dffbf; animation: blink 1.2s infinite; }
 .card.wf .dot.idle { background: var(--acc); box-shadow: 0 0 8px var(--acc); }
 @keyframes blink { 50% { opacity: .25; } }
-.wfbody { display: flex; gap: 10px; height: 84px; margin-top: 4px; }
-#wfGraph { flex: 1 1 auto; min-width: 0; height: 84px !important; margin: 0 !important; }
-#wfList { flex: 0 0 230px; height: 84px; overflow: hidden; position: relative; border-left: 1px solid var(--line); padding-left: 10px;
+.wfbody { display: flex; gap: 10px; height: 70px; margin-top: 2px; }
+#wfGraph { flex: 1 1 auto; min-width: 0; height: 70px !important; margin: 0 !important; }
+#wfList { flex: 0 0 250px; height: 70px; overflow: hidden; position: relative; border-left: 1px solid var(--line); padding-left: 10px;
   -webkit-mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent); }
 #wfTrack { font-family: var(--num); font-size: 20px; line-height: 28px; white-space: nowrap; will-change: transform; }
 #wfTrack .ix { color: var(--acc); margin-right: 8px; font-variant-numeric: tabular-nums; }
@@ -199,3 +199,9 @@ body.capture *, body.capture *::before, body.capture *::after { transition: none
 
 .hlabel.city { color: var(--dim); font-size: 20px; letter-spacing: 2px; }
 @media (max-width: 960px) { .hlabel.city { display: none; } }
+
+/* v6：任务画像 */
+.wfmeta { font-size: 20px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.wfmeta .who, #tickTrack .who { color: #9fd8ff; }
+.nlabel .sub { font-size: 20px; color: var(--dim); font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif; margin-top: -1px; letter-spacing: 0; }
+@media (max-width: 960px) { .wfmeta { font-size: 13px; } .nlabel .sub { display: none; } }.nlabel .sub { max-width: 310px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

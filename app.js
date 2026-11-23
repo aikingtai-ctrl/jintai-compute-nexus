@@ -999,7 +999,7 @@ function detectEvents(i, g) {
   if (!pv || !eventsArmed) return;
   if (pv.on !== cur.on) { fireEvent(i, cur.on ? 'start' : 'off', cur.on ? '● 上线' : '○ 离线'); return; }
   if (!cur.on) return;
-  if (cur.run > pv.run) fireEvent(i, 'start', '▶ 开始');
+  if (cur.run > pv.run) fireEvent(i, 'start', g.job ? `▶ 开始 · ${taskName(g.job.meta, g.job.types)}` : '▶ 开始');
   else if (cur.run < pv.run) fireEvent(i, 'done', '✓ 完成');
   else if (cur.pend > pv.pend) fireEvent(i, 'pend', `⏳ 排队 +${cur.pend - pv.pend}`);
 }
@@ -1040,7 +1040,8 @@ function nodeHtml(n) {
     if (!n.online) return `<span class="id">H100·${n.index}</span>  <span class="st">离线</span>`;
     const st = r.running ? `<span class="run">▶${r.running}</span>` : '<span class="st">空闲</span>';
     const pd = r.pending ? ` <span class="pend">⏳${r.pending}</span>` : '';
-    return `<span class="id">H100·${n.index}</span>  ${fmt(r.vram_used)}<span class="st">/${fmt(r.vram_total, 0)}G</span>  ${st}${pd}`;
+    const sub = r.job ? `<div class="sub">${esc(taskName(r.job.meta, r.job.types))} · ${esc(clientShort(r.job.meta?.client))}</div>` : '';
+    return `<span class="id">H100·${n.index}</span>  ${fmt(r.vram_used)}<span class="st">/${fmt(r.vram_total, 0)}G</span>  ${st}${pd}${sub}`;
   }
   const role = { 0: 'Qwen', 1: 'Blender', 2: 'Topaz', 3: 'ComfyUI' }[n.index];
   if (!n.online) return `<span class="id">5090·${n.index}</span>  <span class="st">${role} · 未上线</span>`;
@@ -1085,7 +1086,8 @@ function applyStats(j, record) {
   agg.aVramPct = tot ? used / tot * 100 : null;
   agg.online = (a.online || 0) + (b.online || 0);
   setText('aVram', fmt(used, 1)); setText('aVramT', ` / ${fmt(tot, 0)} GiB · 在线 ${a.online ?? '--'}/8`);
-  setText('jobs', `${run} / ${pend}`); setText('jobsT', ' 个任务');
+  { const cl = new Set(); aG.forEach((g) => { if (g.job) cl.add(clientName(g.job.meta?.client)); (g.queue || []).forEach((q2) => cl.add(clientName(q2.client))); }); agg.terms = cl.size; }
+  setText('jobs', `${run} / ${pend}`); setText('jobsT', ` 个任务 · ${agg.terms} 个终端`);
   setText('aRam', `${fmt(aRam, 1)}%`); setText('ramT', ` B机 ${fmt(bRam, 1)}%`);
   setText('bOnline', `${b.online ?? '--'}/4`);
   setText('bT', ` 在线 · ${q.online ? fmt(q.tok_s) + ' tok/s' : 'Qwen 未上线'} · ${g3.online ? fmt(g3.temp_c, 0) + '°C ' + fmt(g3.power_w, 0) + 'W' : ''}`);
@@ -1157,6 +1159,40 @@ function hexId(k) { return ((Math.abs(Math.sin(k * 12.9898 + 4.1)) * 4294967295)
 const gpuName = (id) => (id && id[0] === 'A' ? `H100·${id.slice(1)}` : `5090·${(id || '').slice(1)}`);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtDur = (sec) => { if (sec == null) return '--'; sec = Math.max(0, sec); return sec >= 60 ? `${Math.floor(sec / 60)}分${String(Math.floor(sec % 60)).padStart(2, '0')}秒` : `${sec.toFixed(0)}秒`; };
+
+// ---------- v6：任务画像——具体任务 / 发起终端 / 提交与排队 / 模型 / 输出 ----------
+const TASK_RULES = [
+  [/viggle_remake_swap/i, 'Viggle 换角重拍'], [/viggle_remake/i, 'Viggle 视频改景'],
+  [/pika_h3_flex/i, 'Pika-Flex 参考生视频'], [/character_swap|selflift_?avatar/i, 'H3 角色替换'],
+  [/minimax_h3_image/i, 'H3 图像生成'], [/fl2va/i, 'H3 首尾帧视频'], [/ref2va|r2va/i, 'H3 参考生视频'],
+  [/t2va/i, 'H3 文生视频'], [/minimax_h3/i, 'H3 视频生成'], [/seedvr/i, 'SeedVR 超分精修'], [/relayvsr/i, 'RelayVSR 视频超分'],
+  [/qwen.?image|qwen_?2511|qwen21/i, 'Qwen 图像'], [/flux/i, 'Flux 生图'], [/ltx/i, 'LTX 视频'], [/wan2|wan_/i, 'Wan 视频'],
+  [/facefusion|reactor|faceswap/i, '换脸精修'], [/moss/i, 'MOSS 图像'], [/IDENode|PreviewAny/, '节点探活'],
+];
+function taskName(meta, types) {
+  const hay = [...(meta?.models || []), ...(meta?.out || []), ...(types || [])].join(' ');
+  for (const [re, nm] of TASK_RULES) if (re.test(hay)) return nm;
+  return (types || []).some((t) => wfCat(t) === 3) ? '扩散生成' : ((types || [])[0] || '任务');
+}
+function taskDesc(meta, types) {
+  const p = [taskName(meta, types)];
+  if (meta?.res) p.push(meta.res); if (meta?.frames) p.push(`${meta.frames} 帧`); if (meta?.steps) p.push(`${meta.steps} 步`);
+  return p.join(' · ');
+}
+function clientName(c) {
+  if (!c) return 'API 直连·未标识';
+  if (c.kind === 'terminal') return `终端 ${c.name}`;
+  if (c.kind === 'web') return `ComfyUI 网页端${c.tag ? ' #' + c.tag : ''}`;
+  if (c.kind === 'unknown') return 'API 直连·未标识';
+  return c.name;
+}
+function clientShort(c) {
+  if (!c || c.kind === 'unknown') return 'API 直连';
+  if (c.kind === 'web') return '网页端'; if (c.kind === 'gateway') return 'B机网关';
+  return c.name;
+}
+const hms = (sec) => (sec ? new Date(sec * 1000).toLocaleTimeString('zh-CN', { hour12: false }) : '--');
+const nowSec = () => (lastJ && lastJ.ts) || Date.now() / 1000;
 function wfCat(t) {
   if (/Sampler|Sample\b|KSampler/i.test(t)) return 3;
   if (/Save|Preview|Combine|Output|CreateVideo/i.test(t)) return 4;
@@ -1180,26 +1216,32 @@ function layoutWF(types, links) {
   const pos = []; rows.forEach((r, l) => r.forEach((i, k) => { pos[i] = [(l + 0.5) / L, (k + 0.5) / r.length]; }));
   return { pos, layer, L };
 }
-const wfTitle = document.getElementById('wfTitle'), wfTrack = document.getElementById('wfTrack'), wfDot = document.querySelector('.card.wf .dot');
+const wfMeta = document.getElementById('wfMeta'), wfTitle = document.getElementById('wfTitle'), wfTrack = document.getElementById('wfTrack'), wfDot = document.querySelector('.card.wf .dot');
 let wfKey = '', wfLay = null, wfJob = null, wfHot = -1;
 function drawWF(t) {
   if (!wfTitle) return;
   const jobs = (lastJ?.a?.gpus || []).filter((g) => g.job && g.job.types && g.job.types.length);
-  let job = null, title = '实时工作流 · 暂无运行任务', live = false;
+  let job = null, title = '实时工作流 · 暂无运行任务', live = false, metaLine = '';
   if (jobs.length) {
     const k = ((Math.floor(t / 6) % jobs.length) + jobs.length) % jobs.length, g = jobs[k]; job = g.job; live = true;
-    title = `实时工作流 ${k + 1}/${jobs.length} · ${gpuName(g.id)} · ${job.n ?? job.types.length} 节点 · 已运行 ${fmtDur(job.elapsed)} · #${job.id}`;
+    const m = job.meta || {};
+    title = `实时工作流 ${k + 1}/${jobs.length} · ${gpuName(g.id)} · ${taskDesc(m, job.types)} · 已运行 ${fmtDur(job.elapsed)}`;
+    metaLine = `<span class="who">${esc(clientName(m.client))}</span> · 提交 ${hms(m.created)} · 排队 ${fmtDur(m.wait)} · ${job.n ?? job.types.length} 节点 #${job.id}${m.models?.length ? ' · 模型 ' + esc(m.models[0]) : ''}${m.out?.length ? ' · 输出 ' + esc(m.out[0]) : ''}`;
   } else if (lastJ?.recent?.length) {
-    const r = lastJ.recent[0]; job = { types: r.types || [], links: [], id: r.id, n: r.nodes };
-    title = `最近完成 · ${gpuName(r.gpu)} · #${r.id} · ${r.nodes ?? '--'} 节点 · ${fmt(r.dur, 1)}秒 ${r.status === 'ok' ? '✓' : r.status === 'err' ? '✗' : '■'}`;
+    const r = lastJ.recent[0]; job = { types: r.types || [], links: [], id: r.id, n: r.nodes, meta: r.meta };
+    const m = r.meta || {};
+    title = `最近${r.status === 'ok' ? '完成 ✓' : r.status === 'err' ? '报错 ✗' : '中断 ■'} · ${gpuName(r.gpu)} · ${taskDesc(m, r.types)} · 耗时 ${fmt(r.dur, 1)}秒`;
+    metaLine = `<span class="who">${esc(clientName(m.client))}</span> · 结束 ${hms(r.end)} · ${r.nodes ?? '--'} 节点 #${r.id}${m.models?.length ? ' · 模型 ' + esc(m.models[0]) : ''}${m.out?.length ? ' · 输出 ' + esc(m.out[0]) : ''}`;
   }
   setText('wfTitle', title);
+  if (wfMeta && wfMeta.innerHTML !== metaLine) wfMeta.innerHTML = metaLine;
   if (wfDot) wfDot.classList.toggle('idle', !live);
   const key = job ? `${job.id}:${job.types.length}` : '';
   if (key !== wfKey) {
     wfKey = key; wfJob = job; wfLay = job ? layoutWF(job.types, job.links || []) : null; wfHot = -1;
     if (wfTrack) {
-      const items = job ? job.types.map((ty, i) => `<div data-l="${wfLay.layer[i]}"><span class="ix">${String(i + 1).padStart(2, '0')}</span>${esc(ty)}</div>`).join('') : '';
+      const tt = job?.meta?.titles || [];
+      const items = job ? job.types.map((ty, i) => `<div data-l="${wfLay.layer[i]}"><span class="ix">${String(i + 1).padStart(2, '0')}</span>${esc(tt[i] || ty)}</div>`).join('') : '';
       wfTrack.innerHTML = items + items;   // 双份实现无缝循环
     }
   }
@@ -1247,18 +1289,28 @@ function refreshTicks(j, used, tot, run, pend) {
   T.push(`<b>集群</b>在线 ${agg.online}/12 <span class="dim">·</span> A机显存 ${fmt(used)}/${fmt(tot, 0)} GiB <span class="dim">·</span> <span class="run">运行 ${run}</span> <span class="dim">·</span> <span class="pend">排队 ${pend}</span>`);
   (a.gpus || []).forEach((g) => {
     if (!g.online) { T.push(`<b>${gpuName(g.id)}</b><span class="err">离线</span>`); return; }
-    const jb = g.job ? ` <span class="dim">·</span> ${g.job.n ?? g.job.types.length} 节点 <span class="chain">${esc(salient(g.job.types))}</span> <span class="dim">· 已运行 ${fmtDur(g.job.elapsed)}</span>` : '';
+    const jm = g.job?.meta || {};
+    const jb = g.job ? ` <span class="dim">·</span> <span class="chain">${esc(taskDesc(jm, g.job.types))}</span> <span class="dim">·</span> <span class="who">${esc(clientName(jm.client))}</span> <span class="dim">· 已运行 ${fmtDur(g.job.elapsed)} · ${g.job.n ?? g.job.types.length} 节点${jm.out?.length ? ' · 输出 ' + esc(jm.out[0]) : ''}</span>` : '';
+    (g.queue || []).forEach((qi, qk) => {
+      T.push(`<span class="pend">⏳ 排队第 ${qk + 1}</span> <b>${gpuName(g.id)}</b><span class="chain">${esc(taskDesc(qi, qi.types))}</span> <span class="dim">·</span> <span class="who">${esc(clientName(qi.client))}</span> <span class="dim">· 提交 ${hms(qi.created)} · 已等 ${fmtDur(qi.created ? nowSec() - qi.created : null)}</span>`);
+    });
     T.push(`<b>${gpuName(g.id)}</b>显存 ${fmt(g.vram_used)}<span class="dim">/${fmt(g.vram_total, 0)}G</span> ${g.running ? '<span class="run">▶ 运行</span>' : '<span class="dim">空闲</span>'}${g.pending ? ` <span class="pend">⏳ 排队 ${g.pending}</span>` : ''}${jb}`);
   });
   (j.recent || []).slice(0, 8).forEach((r) => {
     const st = r.status === 'ok' ? '<span class="ok">✓ 完成</span>' : r.status === 'err' ? `<span class="err">✗ 报错${r.err_node ? ' @' + esc(r.err_node) : ''}</span>` : '<span class="int">■ 中断</span>';
-    T.push(`${st} <b>${gpuName(r.gpu)}</b><span class="dim">#${r.id}</span> ${r.nodes ?? '--'} 节点 <span class="dim">·</span> 耗时 ${fmt(r.dur, 1)} 秒 <span class="chain">${esc(salient(r.types))}</span>`);
+    const rm = r.meta || {};
+    T.push(`${st} <b>${gpuName(r.gpu)}</b><span class="chain">${esc(taskDesc(rm, r.types))}</span> <span class="dim">·</span> <span class="who">${esc(clientName(rm.client))}</span> <span class="dim">·</span> 耗时 ${fmt(r.dur, 1)} 秒 <span class="dim">· ${hms(r.end)} · #${r.id}${rm.out?.length ? ' · 输出 ' + esc(rm.out[0]) : ''}</span>`);
   });
   const bg = b.gpus || [], q = bg[0] || {}, g3 = bg[3] || {};
   T.push(`<b>5090·0</b>Qwen3.8 ${q.online ? `<span class="run">${fmt(q.tok_s)} tok/s</span>` : '<span class="err">未上线</span>'}`);
   T.push(`<b>5090·3</b>ComfyUI ${g3.online ? `${fmt(g3.temp_c, 0)}°C <span class="dim">·</span> ${fmt(g3.power_w, 0)} W <span class="dim">·</span> 利用率 ${fmt(g3.util_pct, 0)}%` : '<span class="err">未上线</span>'}`);
   T.push(`<b>5090·1</b>Blender ${bg[1]?.online ? '<span class="run">在线</span>' : '<span class="dim">未上线</span>'} <span class="dim">·</span> <b>5090·2</b>Topaz ${bg[2]?.online ? '<span class="run">在线</span>' : '<span class="dim">未上线</span>'}`);
   T.push(`<b>采集</b>每 2 秒 <span class="dim">·</span> 本轮轮询 ${j.poll_ms ?? '--'} ms <span class="dim">·</span> ComfyUI ×9 /queue /history <span class="dim">·</span> NVML`);
+  {   // 活跃终端榜（运行 + 排队）
+    const cnt = new Map();
+    (a.gpus || []).forEach((g) => { if (g.job) { const k = clientName(g.job.meta?.client); cnt.set(k, (cnt.get(k) || 0) + 1); } (g.queue || []).forEach((qi) => { const k = clientName(qi.client); cnt.set(k, (cnt.get(k) || 0) + 1); }); });
+    if (cnt.size) T.splice(1, 0, `<b>活跃终端</b>${[...cnt.entries()].sort((x, y) => y[1] - x[1]).map(([k, v]) => `<span class="who">${esc(k)}</span> ×${v}`).join(' <span class="dim">·</span> ')}`);
+  }
   tickPool = T;
 }
 function tickAppend() {
@@ -1287,10 +1339,16 @@ function demoStats(t) {   // 公网静态托管或未连接采集服务时使用
     { id: 'B2', online: true, running: Math.sin(t * 0.06 + 2) > 0.4 ? 1 : 0 },
     { id: 'B3', online: true, vram_total: 31.8, vram_used: 18.4 + 6 * Math.sin(t * 0.05), temp_c: 44 + 5 * Math.sin(t * 0.04), power_w: 235 + 65 * Math.sin(t * 0.08), util_pct: 62 },
   );
-  A.forEach((g, i) => { if (g.running) { const T = i % 3 === 1 ? DEMO_IMG : DEMO_WF; g.job = { ...T, n: T.types.length, id: hexId(i * 131 + Math.floor((t * 0.11 + i * 1.7) / 6.28)), elapsed: ((t * 0.11 + i * 1.7) % 6.28) / 0.11 }; } });
+  const DC = [{ kind: 'terminal', name: 'studio_ws01' }, { kind: 'service', name: 'H3 图像脚本' }, { kind: 'web', name: 'ComfyUI 网页端', tag: '3f2a' }, { kind: 'terminal', name: 'edit_bay02' }];
+  const dmeta = (T, k, el) => (T === DEMO_IMG
+    ? { client: DC[k % 4], created: Date.now() / 1000 - el - 2, wait: 2, res: '3456×2304', steps: 6, models: ['minimax_h3_image_pruned_int8_convrot'], out: [`minimax_h3_image_t2i_3456x2304_${1000 + k}`], titles: [] }
+    : { client: DC[k % 4], created: Date.now() / 1000 - el - 5, wait: 5, res: '1280×720', frames: 121, steps: 10, models: ['minimax_h3_ref2va_pruned_bf16', 'pika_h3_flex_ref2va_v1_bf16'], out: [`h3_ref2va_shot_${String(k).padStart(2, '0')}`], titles: [] });
+  A.forEach((g, i) => { if (g.running) { const T = i % 3 === 1 ? DEMO_IMG : DEMO_WF; const el = ((t * 0.11 + i * 1.7) % 6.28) / 0.11;
+    g.job = { ...T, n: T.types.length, id: hexId(i * 131 + Math.floor((t * 0.11 + i * 1.7) / 6.28)), elapsed: el, meta: dmeta(T, i, el) };
+    g.queue = Array.from({ length: g.pending || 0 }, (_, q2) => { const T2 = (i + q2) % 2 ? DEMO_IMG : DEMO_WF; return { ...dmeta(T2, i + q2 + 1, 0), id: hexId(i * 17 + q2), n: T2.types.length, types: T2.types }; }); } });
   const recent = [];
   for (let k = 0; k < 10; k++) { const T = k % 3 === 1 ? DEMO_IMG : DEMO_WF; const st = k % 7 === 5 ? 'int' : (k % 11 === 9 ? 'err' : 'ok');
-    recent.push({ gpu: `A${(k * 3 + Math.floor(t / 20)) % 8}`, id: hexId(k * 977 + Math.floor(t / 20)), status: st, nodes: T.types.length, dur: T === DEMO_IMG ? 36 + (k * 7) % 5 : 180 + (k * 53) % 260, types: T.types.slice(0, 14), err_node: st === 'err' ? 'VAEDecodeTiled' : null }); }
+    recent.push({ gpu: `A${(k * 3 + Math.floor(t / 20)) % 8}`, id: hexId(k * 977 + Math.floor(t / 20)), status: st, nodes: T.types.length, dur: T === DEMO_IMG ? 36 + (k * 7) % 5 : 180 + (k * 53) % 260, types: T.types.slice(0, 14), err_node: st === 'err' ? 'VAEDecodeTiled' : null, meta: dmeta(T, k, 0), end: Date.now() / 1000 - k * 23 }); }
   return { ok: true, poll_ms: 180, recent, a: { online: 8, ram_total: 1007, ram_free: 365 + 45 * Math.sin(t * 0.03), gpus: A }, b: { online: 4, ram_total: 252, ram_free: 142 + 18 * Math.cos(t * 0.04), gpus: B } };
 }
 const bootAt = Date.now();
